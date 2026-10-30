@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#4F46E5">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Gestor de Tienda — Inventario, ventas y catálogo</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <aside class="side">
+    <div class="brand" id="side-brand"></div>
+    <nav class="nav" id="side-nav"></nav>
+    <div class="foot" id="side-foot"></div>
+  </aside>
+  <div class="main">
+    <header class="top">
+      <div class="logo" id="top-logo"></div>
+      <h1 id="title">Inicio</h1>
+      <span class="date" id="top-date"></span><span class="pill off" id="sync-pill" data-act="syncNow" title="Estado de sincronización"><i></i><span>Sin conexión</span></span>
+      <button class="btn sm" data-act="go" data-r="vender" id="top-sell"></button>
+    </header>
+    <main id="view"></main>
+  </div>
+  <nav class="tabbar" id="tabbar"></nav>
+</div>
+<div id="modal-root"></div>
+<div id="toast"></div>
+<div id="lock"></div>
+
+<script src="qrcode.js"></script>
+<script src="catalog-template.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+<script src="sync.js"></script>
+</body>
+</html>
