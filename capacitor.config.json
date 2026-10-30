@@ -1,0 +1,7 @@
+{
+  "appId": "com.bizcontrol.app",
+  "appName": "Gestor de Tienda",
+  "webDir": "www",
+  "android": { "allowMixedContent": false },
+  "backgroundColor": "#0f172a"
+}

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+android/
+*.log
+node_modules/
+data/
+*.db
+*.db-*
+dist/
+android/
