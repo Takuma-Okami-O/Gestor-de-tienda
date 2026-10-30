@@ -190,10 +190,10 @@ function showLogin(msg, kind) {
     <div class="f ${needSrv ? '' : 'hide'}" id="lg-srv-f"><label class="l">Servidor</label><input class="in" id="lg-srv" value="${esc(L.server || '')}" placeholder="https://mi-servidor.com" inputmode="url" autocapitalize="none"></div>
     <div class="err" id="lg-err" ${kind === 'info' ? 'style="color:var(--muted)"' : ''}>${esc(msg || '')}</div>
     <button class="btn block" id="lg-go" type="submit" style="padding:14px;font-size:16px">Entrar</button>
-    ${needSrv ? '' : '<a class="link" id="lg-srv-link">Cambiar servidor</a>'}
     <div class="dev">Desarrollado por Analista de sistemas Eber Romero</div></form>`);
   $('#lg-eye').onclick = () => { const p = $('#lg-pass'); p.type = p.type === 'password' ? 'text' : 'password'; };
-  const lk = $('#lg-srv-link'); if (lk) lk.onclick = () => { $('#lg-srv-f').classList.remove('hide'); lk.remove(); $('#lg-srv').focus(); };
+  /* ajuste oculto para soporte: 7 toques seguidos sobre el logo muestran el campo Servidor */
+  let taps = 0, tt; $('#lg-form').firstElementChild.onclick = () => { taps++; clearTimeout(tt); tt = setTimeout(() => taps = 0, 1500); if (taps >= 7) { $('#lg-srv-f').classList.remove('hide'); $('#lg-srv').focus(); } };
   $('#lg-form').onsubmit = e => { e.preventDefault(); doLogin(); };
   ($('#lg-email').value ? $('#lg-pass') : $('#lg-email')).focus();
 }
