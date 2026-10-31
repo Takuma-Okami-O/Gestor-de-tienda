@@ -166,6 +166,7 @@ function ajustesExtra() {
     <div class="f" style="max-width:110px"><label class="l">Símbolo</label><input class="in" data-input="moneda2" value="${esc(c.moneda2 || 'Bs')}" maxlength="4"></div></div>
     ${c.tasaFuente === 'manual' ? `<div class="f"><label class="l">Tasa manual (${esc(c.moneda2 || 'Bs')} por ${esc(c.moneda)})</label><input class="in" type="number" step="0.01" inputmode="decimal" data-input="tasaManual" value="${c.tasaManual || ''}"></div>` : ''}` : `<p class="muted small">${c.tasaOn ? 'El dueño activó la segunda moneda.' : 'Segunda moneda desactivada por el dueño.'}</p>`}
     <dl class="kv2" style="margin:6px 0 10px"><dt>BCV</dt><dd>${XT.r.bcv ? NF.format(XT.r.bcv) : '—'}</dd><dt>USDT / paralelo</dt><dd>${XT.r.usdt ? NF.format(XT.r.usdt) : '—'}</dd><dt>Consultado</dt><dd>${a < 0 ? 'nunca' : a < 2 ? 'ahora' : 'hace ' + (a < 60 ? a + ' min' : Math.round(a / 60) + ' h')}</dd></dl>
+    <div class="f" style="margin-top:6px"><label class="l">Montos en los mensajes y facturas para clientes</label><select class="in" data-input="cfg" data-k="msgBs">${[['no', 'Solo en $ (recomendado)'], ['bcv', '$ y Bs a tasa BCV'], ['usdt', '$ y Bs a tasa USDT'], ['manual', '$ y Bs a tasa manual']].map(([v, l]) => `<option value="${v}" ${(c.msgBs || 'no') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <button class="btn soft block" data-act="tasaRef">↻ Actualizar tasas ahora</button>
     <div class="hint small" style="margin-top:8px">Se actualiza sola cada hora con internet (el servidor la consulta cada 30 min para todas las tiendas). Sin conexión se usa la última tasa guardada. Cada factura guarda la tasa del momento de la venta.</div></div>`;
   const resp = owner ? `<div class="card"><h3>${ic('download')} Respaldos</h3>
@@ -332,16 +333,18 @@ function plan(f) {
   if (!f || f.tipo !== 'CREDITO' || f.estado === 'ANULADA') return [];
   const n = Math.max(1, Math.floor(f.cuotas || 1)), fr = f.freq || 15;
   if (!f.vence && n === 1) return [];
-  const first = f.vence || addDays(ymd(f.fecha), fr), base = r2(f.total / n); let rest = pagado(f); const hoy = todayStr();
+  // las cuotas dividen lo que queda después del abono inicial
+  const ini = r2(f.inicial != null ? f.inicial : ((f.abonos || []).find(a => /inicial/i.test(a.nota || '')) || {}).monto || 0), tot = Math.max(0, r2(f.total - ini));
+  const first = f.vence || addDays(ymd(f.fecha), fr), base = r2(tot / n); let rest = Math.max(0, r2(pagado(f) - ini)); const hoy = todayStr();
   return [...Array(n)].map((_, k) => {
-    const monto = k === n - 1 ? r2(f.total - base * (n - 1)) : base, pag = Math.min(monto, Math.max(0, rest)); rest = r2(rest - pag);
+    const monto = k === n - 1 ? r2(tot - base * (n - 1)) : base, pag = Math.min(monto, Math.max(0, rest)); rest = r2(rest - pag);
     const fecha = addDays(first, k * fr), pend = r2(monto - pag), ok = pend <= 0.004;
     return { n: k + 1, de: n, fecha, monto, pend: ok ? 0 : pend, estado: ok ? 'Pagada' : fecha < hoy ? 'Vencida' : 'Pendiente', f };
   });
 }
 const _ut2 = updateTotals; updateTotals = function () {
   _ut2(); const t = $('#cart-totals'); if (!t || cart.tipo !== 'CREDITO') return; const n = Math.max(1, Math.min(24, Math.floor(num(cart.cuotas)) || 1));
-  if (n > 1) { const c = cartCalc(); t.insertAdjacentHTML('beforeend', `<div class="tr" style="font-size:13px;color:var(--muted)"><span>${n} cuotas de</span><b>${money(r2(c.total / n))}</b></div>`); }
+  if (n > 1) { const c = cartCalc(); t.insertAdjacentHTML('beforeend', `<div class="tr" style="font-size:13px;color:var(--muted)"><span>${n} cuotas de</span><b>${money(r2(c.saldo / n))}</b></div>`); }
 };
 const _rc = renderCart; renderCart = function () {
   _rc(); if (cart.tipo !== 'CREDITO') return; const v = $('[data-input=cartVence]'); if (!v) return;
@@ -392,3 +395,64 @@ Object.assign(ACT, { recSend: d => { const x = recDue().find(y => y.cl.id === d.
 remind = function (cid) { const c = cliente(cid); openWA(c.tel, remindText(cid)); marcaRec(cid); };
 function recPrev() { const c = cliente(S.clientes[0] && S.clientes[0].id) || { nombre: 'María', id: '' }, d = { tipo: 'antes', cuotas: [{ n: 2, de: 4, fecha: addDays(todayStr(), 3), pend: 25 }] }; const cf = cfgD(), real = S.config; S.config = cf; try { return (() => { const saved = remindText; return `${safeTxt(cf.recSaludo, c) || 'Hola ' + c.nombre + ' 👋'}\n\n${msgBloque({ id: '', nombre: c.nombre }, d)}\n\n${safeTxt(cf.recCierre, c) || '¡Gracias por tu puntualidad!'}`; })(); } finally { S.config = real; } }
 document.addEventListener('input', e => { const k = e.target.dataset && e.target.dataset.k; if ((k === 'recSaludo' || k === 'recCierre') && $('#rec-prev')) $('#rec-prev').textContent = recPrev(); });
+
+/* ---------- 11) Montos en Bs opcionales en mensajes y facturas del cliente + factura corporativa ---------- */
+const msgMode = () => { let d = ''; try { d = localStorage.getItem('gestor_msgbs') || ''; } catch { } return ['no', 'bcv', 'usdt', 'manual'].includes(d) ? d : (S.config.msgBs || 'no'); };
+const msgRate = () => { const m = msgMode(); return m === 'bcv' ? XT.r.bcv : m === 'usdt' ? XT.r.usdt : m === 'manual' ? num(S.config.tasaManual) : 0; };
+const mB = n => { const r = msgRate(); return money(n) + (r ? ` (${XT.sym()} ${NF.format(n * r)})` : ''); };
+const msgSel = () => `<div class="row small" style="gap:8px;align-items:center;margin-bottom:8px"><span class="muted">Montos en:</span><select class="in" data-input="msgBsDev" style="width:auto;padding:6px 10px">${[['no', 'Solo $'], ['bcv', '$ y Bs (BCV)'], ['usdt', '$ y Bs (USDT)'], ['manual', '$ y Bs (manual)']].map(([v, l]) => `<option value="${v}" ${msgMode() === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
+INP.msgBsDev = e => { try { localStorage.setItem('gestor_msgbs', e.target.value); } catch { } if (e.target.value !== 'no' && !XT.r.bcv) XT.refresh(); const o = $$('.overlay').pop(); if (o) { closeModal(o); setTimeout(recModal, 220); } };
+const _cfgI = INP.cfg; INP.cfg = e => { _cfgI(e); if (e.target.dataset.k === 'msgBs' && e.target.value !== 'no' && !XT.r.bcv) XT.refresh(); };
+const _rm = recModal; recModal = function () { _rm(); const d = [...$$('.dialog')].pop(); if (d) d.querySelector('.dh').insertAdjacentHTML('afterend', msgSel()); }; ACT.recOpen = recModal;
+msgBloque = function (c, d) {
+  if (d && d.tipo === 'antes') return d.cuotas.map(x => { const dd = diasHasta(x.fecha); return `🗓️ Tu cuota *${x.n} de ${x.de}* en *${S.config.nombre}* ${dd <= 0 ? 'vence *hoy*' : dd === 1 ? 'vence *mañana*' : 'vence el *' + fdate(x.fecha + 'T12:00:00') + '*'}.\n💰 Monto a cancelar: *${mB(x.pend)}*`; }).join('\n\n');
+  const pend = activas().filter(f => f.clienteId === c.id && saldo(f) > 0);
+  return `Tienes un saldo pendiente en *${S.config.nombre}* de *${mB(deudaCliente(c.id))}*:\n` + pend.map(f => `• ${f.num} (${fdate(f.fecha)}): ${mB(saldo(f))}`).join('\n');
+};
+facText = function (f) {
+  const c = S.config, p = plan(f), L2 = [`🏪 *${c.nombre}*`, c.slogan ? `_${c.slogan}_` : '', c.idFiscal ? `ID fiscal: ${c.idFiscal}` : '', '━━━━━━━━━━━━━━━', `🧾 *FACTURA ${f.num}*`, `📅 ${fdt(f.fecha)}`, `👤 Cliente: ${f.clienteNombre}`, '━━━━━━━━━━━━━━━', '🛍️ *Detalle*'].filter(x => x !== '');
+  f.items.forEach(i => L2.push(`${i.qty} × ${i.nombre}${i.variante ? ' (' + i.variante + ')' : ''} — ${money(i.precio * i.qty)}`));
+  L2.push('━━━━━━━━━━━━━━━');
+  if (f.descPct) L2.push(`🏷️ Descuento ${f.descPct}%: −${money(f.desc)}`);
+  L2.push(`💰 *TOTAL: ${mB(f.total)}*`);
+  if (f.tipo === 'CREDITO') {
+    L2.push(`✅ Abonado: ${mB(pagado(f))}`, `⏳ *Saldo pendiente: ${mB(saldo(f))}*`);
+    const pe = p.filter(x => x.pend > 0);
+    if (pe.length) L2.push('', `📆 *Cuotas pendientes${p.length > 1 ? ' (' + pe.length + ' de ' + p.length + ')' : ''}*`, ...pe.map(x => `• Cuota ${x.n}/${x.de} — ${fdate(x.fecha + 'T12:00:00')}: ${mB(x.pend)}`));
+    else if (saldo(f) <= 0) L2.push('', '🎉 *¡Crédito cancelado por completo!*');
+    else if (f.vence) L2.push(`📆 Fecha de pago: ${fdate(f.vence + 'T12:00:00')}`);
+  } else L2.push(`✅ Pagado (${f.metodo})`);
+  if (c.pie) L2.push('', c.pie);
+  return L2.join('\n');
+};
+facHTML = function (f) {
+  const [, est] = facEstado(f), cli = cliente(f.clienteId), acc = accent(), c = S.config, p = plan(f), r = msgRate(), cred = f.tipo === 'CREDITO', sal = saldo(f);
+  const ink = inkFor(acc), bs = n => r ? `<div class="bs">${esc(XT.sym())} ${NF.format(n * r)}</div>` : '';
+  const stamp = f.estado === 'ANULADA' ? ['#6b7280', 'ANULADA'] : sal > 0 ? ['#b45309', 'PENDIENTE'] : ['#15803d', 'PAGADA'];
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Factura ${f.num}</title><style>
+  *{box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;color:#1f2430;margin:0;font-size:12.5px;background:#fff}.pg{max-width:820px;margin:0 auto}
+  .band{background:${acc};color:${ink};padding:26px 34px;display:flex;justify-content:space-between;align-items:center;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .band img{height:62px;border-radius:10px;background:#fff;padding:4px;margin-right:14px}.band .nm{font-size:23px;font-weight:800;letter-spacing:.3px}.band .sl{opacity:.85;font-size:12px;margin-top:2px}
+  .band .fx{text-align:right}.band .fx small{letter-spacing:3px;font-size:11px;opacity:.85}.band .fx b{display:block;font-size:26px;margin-top:2px}
+  .in{padding:22px 34px}.grid{display:flex;gap:16px;margin-bottom:18px}.box{flex:1;border:1px solid #e5e7eb;border-radius:12px;padding:13px 15px}.box h4{margin:0 0 6px;font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:${acc}}.box div{line-height:1.55}.mut{color:#6b7280}
+  .stamp{display:inline-block;border:2.5px solid ${stamp[0]};color:${stamp[0]};font-weight:800;letter-spacing:2px;padding:3px 14px;border-radius:8px;transform:rotate(-4deg);font-size:15px;margin-top:6px}
+  table{width:100%;border-collapse:collapse}th{background:${acc};color:${ink};text-align:left;padding:10px 12px;font-size:10.5px;letter-spacing:1px;text-transform:uppercase;-webkit-print-color-adjust:exact;print-color-adjust:exact}th:first-child{border-radius:8px 0 0 8px}th:last-child{border-radius:0 8px 8px 0}
+  td{padding:10px 12px;border-bottom:1px solid #eef0f3}tbody tr:nth-child(even) td{background:#f8f9fb;-webkit-print-color-adjust:exact;print-color-adjust:exact}.r{text-align:right}.bs{font-size:10.5px;color:#6b7280}
+  .tw{display:flex;gap:18px;margin-top:16px;align-items:flex-start}.tw .l{flex:1}.tot{width:300px;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}.tot div{display:flex;justify-content:space-between;padding:8px 14px}
+  .tot .big{background:${acc};color:${ink};font-size:17px;font-weight:800;-webkit-print-color-adjust:exact;print-color-adjust:exact}.tot .sd{background:#fff7ed;color:#9a3412;font-weight:700}
+  h5{margin:18px 0 6px;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:${acc}}
+  .ft{margin-top:26px;border-top:3px solid ${acc};padding:12px 34px;text-align:center;color:#4b5563}.ft b{color:#1f2430}.dev{font-size:9.5px;color:#9ca3af;margin-top:6px}.nf{font-size:9.5px;color:#9ca3af}
+  @page{margin:10mm}</style></head><body><div class="pg">
+  <div class="band"><div style="display:flex;align-items:center">${logoPrint() ? `<img src="${logoPrint()}">` : ''}<div>${!c.logo && themeOf().wide ? '' : `<div class="nm">${esc(c.nombre)}</div>`}<div class="sl">${esc(c.slogan || '')}</div></div></div>
+    <div class="fx"><small>FACTURA</small><b>${f.num}</b><div style="font-size:11.5px;opacity:.9">${fdt(f.fecha)}</div></div></div>
+  <div class="in"><div class="grid"><div class="box"><h4>Emisor</h4><div><b>${esc(c.nombre)}</b>${c.idFiscal ? `<br>ID fiscal: ${esc(c.idFiscal)}` : ''}${c.direccion ? `<br><span class="mut">${esc(c.direccion)}</span>` : ''}${c.whatsapp ? `<br><span class="mut">Tel. ${esc(c.whatsapp)}</span>` : ''}</div></div>
+    <div class="box"><h4>Facturado a</h4><div><b>${esc(f.clienteNombre)}</b>${cli && cli.doc ? `<br>${esc(cli.doc)}` : ''}${cli && cli.tel ? `<br><span class="mut">${esc(cli.tel)}</span>` : ''}${cli && cli.dir ? `<br><span class="mut">${esc(cli.dir)}</span>` : ''}</div></div>
+    <div class="box" style="max-width:170px;text-align:center"><h4>Estado</h4><div class="stamp">${stamp[1]}</div><div class="mut" style="margin-top:8px">${cred ? 'Venta a crédito' : 'Contado · ' + esc(f.metodo || '')}</div></div></div>
+  <table><thead><tr><th>Descripción</th><th class="r">Cant.</th><th class="r">Precio</th><th class="r">Importe</th></tr></thead><tbody>
+  ${f.items.map(i => `<tr><td><b>${esc(i.nombre)}</b>${i.variante ? `<br><span class="mut">${esc(i.variante)}</span>` : ''}</td><td class="r">${i.qty}</td><td class="r">${money(i.precio)}</td><td class="r"><b>${money(i.precio * i.qty)}</b>${bs(i.precio * i.qty)}</td></tr>`).join('')}</tbody></table>
+  <div class="tw"><div class="l">${cred && p.length ? `<h5>Plan de cuotas</h5><table><thead><tr><th>Cuota</th><th>Fecha</th><th class="r">Monto</th><th class="r">Estado</th></tr></thead><tbody>${p.map(x => `<tr><td>${x.n} de ${x.de}</td><td>${fdate(x.fecha + 'T12:00:00')}</td><td class="r">${money(x.monto)}</td><td class="r">${x.estado === 'Pagada' ? '✔ Pagada' : 'Pendiente'}</td></tr>`).join('')}</tbody></table>` : ''}
+    ${f.abonos.length && cred ? `<h5>Pagos registrados</h5><table><tbody>${f.abonos.map(a => `<tr><td>${fdt(a.fecha)}</td><td>${esc(a.metodo)}</td><td class="r">${money(a.monto)}</td></tr>`).join('')}</tbody></table>` : ''}</div>
+    <div class="tot"><div><span>Subtotal</span><span>${money(f.subtotal)}</span></div>${f.descPct ? `<div><span>Descuento ${f.descPct}%</span><span>−${money(f.desc)}</span></div>` : ''}<div class="big"><span>TOTAL</span><span>${money(f.total)}</span></div>${r ? `<div class="bs"><span>Referencia en ${esc(XT.sym())}</span><span>${NF.format(f.total * r)}</span></div>` : ''}
+      ${cred ? `<div><span>Abonado</span><span>${money(pagado(f))}</span></div><div class="sd"><span>Saldo pendiente</span><span>${money(sal)}</span></div>${r && sal > 0 ? `<div class="bs"><span>Saldo en ${esc(XT.sym())}</span><span>${NF.format(sal * r)}</span></div>` : ''}` : ''}</div></div></div>
+  <div class="ft"><b>${esc(c.pie || '¡Gracias por su compra!')}</b><div class="nf">Comprobante de venta interno · no es un documento fiscal</div><div class="dev">Gestor de Tienda · Desarrollado por Analista de sistemas Eber Romero</div></div></div></body></html>`;
+};
