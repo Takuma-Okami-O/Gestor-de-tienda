@@ -7,7 +7,7 @@
    ===================================================================== */
 
 /* ---------- estado local del dispositivo (no se sincroniza) ---------- */
-let L = { pin: '', token: '', user: null, store: null, server: '', tema: '', nombre: '' };
+let L = { pin: '', token: '', refresh: '', exp: 0, user: null, store: null, server: '', tema: '', nombre: '' };
 // Y = bookkeeping de sincronización: cursor del servidor y metadatos por registro
 let Y = { cursor: 0, meta: {}, storeId: '', last: 0, pulled: false, skew: 0 };
 const COLS = ['productos', 'clientes', 'facturas', 'movs'];
@@ -19,8 +19,10 @@ const nowU = () => Date.now() + (Y.skew || 0);
 
 /* ---------- servidor ---------- */
 function normServer(s) { s = String(s || '').trim().replace(/\/+$/, ''); if (!s) return ''; return /^https?:\/\//i.test(s) ? s : 'https://' + s; }
-const serverBase = () => normServer(L.server || (window.BIZ && BIZ.server) || (!isNative() && /^https?:$/.test(location.protocol) ? location.origin : ''));
+const SB = () => { const c = window.BIZ && BIZ.supabase; return c && c.url && c.key ? { url: String(c.url).replace(/\/+$/, ''), key: c.key } : null; };
+const serverBase = () => SB() ? SB().url : normServer(L.server || (window.BIZ && BIZ.server) || (!isNative() && /^https?:$/.test(location.protocol) ? location.origin : ''));
 async function api(path, body, method) {
+  if (SB()) return sbApi(path, body, method);
   const base = serverBase();
   if (!base) throw Object.assign(new Error('Falta la dirección del servidor'), { code: 'noserver' });
   const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 90000);
@@ -31,6 +33,75 @@ async function api(path, body, method) {
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(j.error || 'Error ' + r.status), { code: r.status });
   return j;
+}
+
+/* ---------- Supabase (auth + funciones RPC; ver supabase/schema.sql) ---------- */
+async function sbFetch(url, opt, token) {
+  const c = SB(), ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 90000); let r;
+  try { r = await fetch(url, { ...opt, headers: { 'Content-Type': 'application/json', apikey: c.key, Authorization: 'Bearer ' + (token || c.key) }, signal: ctl.signal }); }
+  catch (e) { throw Object.assign(new Error('No se pudo conectar con el servidor'), { code: 'net' }); }
+  finally { clearTimeout(to); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const raw = String(j.message || j.msg || j.error_description || j.error || ''), low = raw.toLowerCase();
+    let msg = raw || 'Error ' + r.status, code = r.status;
+    if (low.includes('cuenta_desactivada')) { msg = 'Tu cuenta fue desactivada. Contacta al dueño.'; code = 401; }
+    else if (low.includes('invalid login') || low.includes('invalid_grant') || low.includes('invalid credentials')) { msg = 'Correo o contraseña incorrectos'; code = 400; }
+    else if (low.includes('already registered') || low.includes('already been registered')) { msg = 'Ese correo ya está registrado'; code = 409; }
+    else if (low.includes('rate limit') || r.status === 429) { msg = 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.'; code = 429; }
+    else if (low.includes('password should be') || low.includes('weak')) { msg = 'La contraseña es muy débil (mínimo 8 caracteres)'; code = 400; }
+    else if (low.includes('jwt') || r.status === 401) { msg = 'Sesión no válida'; code = 401; }
+    throw Object.assign(new Error(msg), { code, raw });
+  }
+  return j;
+}
+let refreshing = null;
+function sbSetSession(j) { L.token = j.access_token; L.refresh = j.refresh_token || L.refresh; L.exp = Date.now() + (j.expires_in || 3600) * 1000; }
+async function sbRefresh() {
+  if (refreshing) return refreshing;
+  refreshing = (async () => {
+    try { const j = await sbFetch(SB().url + '/auth/v1/token?grant_type=refresh_token', { method: 'POST', body: JSON.stringify({ refresh_token: L.refresh }) }); sbSetSession(j); await saveLocal(); }
+    catch (e) { if (e.code === 'net') throw e; throw Object.assign(new Error('Sesión expirada'), { code: 401 }); }
+    finally { refreshing = null; }
+  })();
+  return refreshing;
+}
+async function sbToken() { if (L.refresh && (!L.exp || L.exp - Date.now() < 60000)) await sbRefresh(); return L.token; }
+async function rpc(fn, args) {
+  const call = async () => sbFetch(SB().url + '/rest/v1/rpc/' + fn, { method: 'POST', body: JSON.stringify(args || {}) }, await sbToken());
+  try { return await call(); }
+  catch (e) { if (e.code === 401 && L.refresh && e.raw && /jwt/i.test(e.raw)) { await sbRefresh(); return call(); } throw e; }
+}
+async function sbApi(path, body, method) {
+  const url = SB().url;
+  if (path === '/api/login') {
+    const j = await sbFetch(url + '/auth/v1/token?grant_type=password', { method: 'POST', body: JSON.stringify({ email: String(body.email).trim().toLowerCase(), password: body.password }) });
+    sbSetSession(j);
+    try { const m = await rpc('me'); return { token: L.token, user: m.user, store: m.store }; }
+    catch (e) { L.token = L.refresh = ''; if (e.code === 'net') throw e; throw Object.assign(new Error(/desactivada/.test(e.message) ? e.message : 'Esta cuenta no tiene una tienda asignada. Contacta a soporte.'), { code: 400 }); }
+  }
+  if (path === '/api/sync') return rpc('sync', { since: body.since || 0, push: body.push || [] });
+  if (path === '/api/logout') { try { await sbFetch(url + '/auth/v1/logout', { method: 'POST' }, await sbToken()); } catch { } return { ok: true }; }
+  if (path === '/api/password') {
+    if (String(body.new || '').length < 8) throw Object.assign(new Error('La nueva contraseña debe tener al menos 8 caracteres'), { code: 400 });
+    try { await sbFetch(url + '/auth/v1/token?grant_type=password', { method: 'POST', body: JSON.stringify({ email: L.user.email, password: body.old }) }); }
+    catch (e) { if (e.code === 400) throw Object.assign(new Error('La contraseña actual no es correcta'), { code: 400 }); throw e; }
+    await sbFetch(url + '/auth/v1/user', { method: 'PUT', body: JSON.stringify({ password: body.new }) }, await sbToken()); return { ok: true };
+  }
+  if (path === '/api/users' && !body) return rpc('team_list');
+  if (path === '/api/users') {
+    const email = String(body.email || '').trim().toLowerCase(), nombre = String(body.nombre || '').trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw Object.assign(new Error('Correo no válido'), { code: 400 });
+    if (!nombre) throw Object.assign(new Error('Escribe el nombre'), { code: 400 });
+    if (String(body.password || '').length < 8) throw Object.assign(new Error('La contraseña debe tener al menos 8 caracteres'), { code: 400 });
+    // se crea la cuenta con una petición aparte (no cambia la sesión del dueño) y luego se enlaza a su tienda
+    const j = await sbFetch(url + '/auth/v1/signup', { method: 'POST', body: JSON.stringify({ email, password: body.password }) });
+    const uid = (j.user && j.user.id) || j.id; if (!uid) throw new Error('No se pudo crear la cuenta');
+    return rpc('team_add', { uid, nombre, rol: body.rol === 'owner' ? 'owner' : 'employee' });
+  }
+  const um = path.match(/^\/api\/users\/([\w-]+)$/);
+  if (um) return rpc('team_update', { uid: um[1], nombre: body.nombre, rol: body.rol, active: body.active });
+  throw new Error('Operación no soportada');
 }
 
 /* ---------- seguimiento de cambios ---------- */
@@ -182,7 +253,7 @@ function brandBlock() {
 const EYE = '<svg class="ic" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 function showLogin(msg, kind) {
   applyTheme();
-  const needSrv = !serverBase();
+  const needSrv = !SB() && !serverBase();
   lockShow(`<form class="loginbox" id="lg-form" autocomplete="on">${brandBlock()}
     <div class="sub">Inicia sesión para continuar</div>
     <div class="f"><label class="l">Correo</label><input class="in" id="lg-email" type="email" autocomplete="username" inputmode="email" autocapitalize="none" value="${esc(L.user?.email || L.lastEmail || '')}" placeholder="tucorreo@ejemplo.com"></div>
@@ -193,7 +264,7 @@ function showLogin(msg, kind) {
     <div class="dev">Desarrollado por Analista de sistemas Eber Romero</div></form>`);
   $('#lg-eye').onclick = () => { const p = $('#lg-pass'); p.type = p.type === 'password' ? 'text' : 'password'; };
   /* ajuste oculto para soporte: 7 toques seguidos sobre el logo muestran el campo Servidor */
-  let taps = 0, tt; $('#lg-form').firstElementChild.onclick = () => { taps++; clearTimeout(tt); tt = setTimeout(() => taps = 0, 1500); if (taps >= 7) { $('#lg-srv-f').classList.remove('hide'); $('#lg-srv').focus(); } };
+  let taps = 0, tt; $('#lg-form').firstElementChild.onclick = () => { taps++; clearTimeout(tt); tt = setTimeout(() => taps = 0, 1500); if (taps >= 7 && !SB()) { $('#lg-srv-f').classList.remove('hide'); $('#lg-srv').focus(); } };
   $('#lg-form').onsubmit = e => { e.preventDefault(); doLogin(); };
   ($('#lg-email').value ? $('#lg-pass') : $('#lg-email')).focus();
 }
@@ -232,7 +303,7 @@ function showPin() {
   $('#lk-pin').focus();
 }
 function sessionExpired() {
-  L.token = ''; saveLocal(); clearInterval(loopT); setPill('off');
+  L.token = ''; L.refresh = ''; saveLocal(); clearInterval(loopT); setPill('off');
   showLogin('Tu sesión expiró o fue cerrada. Inicia sesión de nuevo (tus cambios sin enviar se conservan).', 'info');
 }
 let entered = false;
@@ -252,7 +323,7 @@ async function doLogout() {
   clearInterval(loopT); clearTimeout(syncT);
   const keep = { tema: S.config.tema, nombre: S.config.nombre };
   S = DEFAULT(); S.config.tema = keep.tema; Y = { cursor: 0, meta: {}, storeId: '', last: 0, pulled: false, skew: 0 };
-  const email = L.user?.email; L.token = ''; L.user = null; L.store = null; L.pin = ''; L.lastEmail = email || L.lastEmail;
+  const email = L.user?.email; L.token = ''; L.refresh = ''; L.exp = 0; L.user = null; L.store = null; L.pin = ''; L.lastEmail = email || L.lastEmail;
   await IDB.set('state', S); await IDB.set('sync', Y); await saveLocal();
   entered = false; location.hash = ''; showLogin();
 }
@@ -271,7 +342,7 @@ function userModal(u) {
     <div class="f"><label class="l">Nombre</label><input class="in" id="us-nom" value="${esc(u?.nombre || '')}" placeholder="Ej. María (caja)"></div>
     <div class="f"><label class="l">Correo (será su usuario)</label><input class="in" id="us-email" type="email" ${u ? 'disabled' : ''} value="${esc(u?.email || '')}" inputmode="email" autocapitalize="none"></div>
     <div class="f"><label class="l">Rol</label><select class="in" id="us-rol"><option value="employee" ${u?.rol !== 'owner' ? 'selected' : ''}>Empleado — vende, factura y cobra; no ve costos ni ajustes</option><option value="owner" ${u?.rol === 'owner' ? 'selected' : ''}>Dueño — acceso total</option></select></div>
-    <div class="f"><label class="l">${u ? 'Nueva contraseña (déjala vacía para no cambiarla)' : 'Contraseña (mín. 8)'}</label><div class="row"><input class="in" id="us-pw" type="text" autocomplete="off" placeholder="${u ? '••••••••' : ''}"><button class="btn soft" type="button" style="flex:none" data-act="pwGen">Generar</button></div></div>
+    ${u && SB() ? '' : `<div class="f"><label class="l">${u ? 'Nueva contraseña (déjala vacía para no cambiarla)' : 'Contraseña (mín. 8)'}</label><div class="row"><input class="in" id="us-pw" type="text" autocomplete="off" placeholder="${u ? '••••••••' : ''}"><button class="btn soft" type="button" style="flex:none" data-act="pwGen">Generar</button></div></div>`}
     ${u ? `<label class="row" style="cursor:pointer"><input type="checkbox" id="us-act" style="width:20px;height:20px;accent-color:var(--accent)" ${u.active ? 'checked' : ''}><span class="b">Cuenta activa</span></label>` : ''}
     <div class="hint small" style="margin-top:12px">Entrégale el correo y la contraseña a la persona. Al cambiar una contraseña se cierran sus sesiones abiertas.</div>
     <div class="dfoot"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="userSave" data-id="${u ? u.id : ''}">${ic('check')} Guardar</button></div>`);
@@ -287,7 +358,7 @@ Object.assign(ACT, {
   userEdit: d => userModal((window._team || []).find(u => u.id === d.id)),
   pwGen: () => { $('#us-pw').value = genPw(); },
   userSave: async d => {
-    const nombre = $('#us-nom').value.trim(), rol = $('#us-rol').value, pw = $('#us-pw').value.trim();
+    const nombre = $('#us-nom').value.trim(), rol = $('#us-rol').value, pw = ($('#us-pw')?.value || '').trim();
     if (!nombre) return toast('Escribe el nombre', 'err');
     try {
       if (d.id) { await api('/api/users/' + d.id, { nombre, rol, active: $('#us-act').checked, ...(pw ? { password: pw } : {}) }, 'PATCH'); }
