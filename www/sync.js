@@ -38,7 +38,7 @@ async function api(path, body, method) {
 /* ---------- Supabase (auth + funciones RPC; ver supabase/schema.sql) ---------- */
 async function sbFetch(url, opt, token) {
   const c = SB(), ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 90000); let r;
-  try { r = await fetch(url, { ...opt, headers: { 'Content-Type': 'application/json', apikey: c.key, Authorization: 'Bearer ' + (token || c.key) }, signal: ctl.signal }); }
+  try { r = await fetch(url, { ...opt, headers: { 'Content-Type': 'application/json', apikey: c.key, ...((token || /^eyJ/.test(c.key)) ? { Authorization: 'Bearer ' + (token || c.key) } : {}) }, signal: ctl.signal }); }
   catch (e) { throw Object.assign(new Error('No se pudo conectar con el servidor'), { code: 'net' }); }
   finally { clearTimeout(to); }
   const j = await r.json().catch(() => ({}));
