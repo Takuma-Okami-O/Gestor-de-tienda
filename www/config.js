@@ -3,7 +3,7 @@
    tema:   tema inicial (pantalla de login) — luego manda el de la tienda en la nube. */
 window.BIZ = {
   // Supabase: Project Settings > API  →  Project URL y la clave "anon public" (es pública por diseño, la seguridad está en el SQL)
-  supabase: { url: ''knlpzyqalbfcazwlqila '' },
+   supabase: { url: 'https://knlpzyqalbfcazwlqila.supabase.co', key: 'sb_publishable_ws7hANQEGbLOghuTCkuKFQ_6DurbLgp' },
   server: '',
   tema: 'tesanz',
   nombre: 'Tesanz',
