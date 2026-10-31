@@ -232,7 +232,7 @@ addEventListener('hashchange', () => { if (!$('#lock').classList.contains('gone'
 function render() {
   const key = (location.hash || '#inicio').slice(1); const R = ROUTES[key] || ROUTES.inicio;
   $('#title').textContent = R.t; $('#view').innerHTML = R.v();
-  const act = ['historial', 'catalogo', 'ajustes', 'mas'].includes(key) ? (key === 'mas' ? 'mas' : 'mas') : key;
+  const act = ['inicio', 'inventario', 'vender', 'creditos'].includes(key) ? key : 'mas';
   $$('[data-nav]').forEach(a => a.classList.toggle('active', a.dataset.nav === key || (a.closest('#tabbar') && a.dataset.nav === act)));
   $('#top-date').textContent = new Date().toLocaleDateString('es-VE', { weekday: 'long', day: 'numeric', month: 'long' });
   if (R.after) R.after();

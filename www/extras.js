@@ -261,3 +261,44 @@ setTimeout(recAviso, 8000); setInterval(recAviso, 30 * 60 * 1000);
 
 // al terminar de escribir un precio/recargo de crédito, se redibuja el carrito (así no se pierde el cursor mientras escribes)
 document.addEventListener('change', e => { const k = e.target.dataset && e.target.dataset.input; if (k === 'cartPrecio' || k === 'cartRec') renderCart(); });
+
+/* ---------- 8) Ajustes ordenado en secciones (menú «Más» y barra lateral) ---------- */
+const ajFull = vAjustes;
+function ajCards() {
+  const t = document.createElement('template'); t.innerHTML = ajFull(); const o = {};
+  t.content.querySelectorAll('.card').forEach(c => {
+    const h = (c.querySelector('h3') || {}).textContent || '', x = h.trim();
+    const k = /Datos del negocio/.test(x) ? 'datos' : /Apariencia/.test(x) ? 'apar' : /Mi cuenta/.test(x) ? 'cuenta' : /Sincronizaci/.test(x) ? 'sync' : /^Equipo/.test(x) ? 'equipo' : /Permisos del equipo/.test(x) ? 'perm' : /Bloqueo/.test(x) ? 'pin'
+      : /Respaldo de datos/.test(x) ? 'resp1' : /Respaldos/.test(x) ? 'resp2' : /ejemplo y reinicio/.test(x) ? 'demo' : /Segunda moneda/.test(x) ? 'tasa' : /Recordatorios/.test(x) ? 'cobros' : /Versi/.test(x) ? 'ver' : 'otro';
+    o[k] = c.outerHTML;
+  });
+  return o;
+}
+const sig = '<div class="dev" style="text-align:center;margin:18px 0 6px;color:var(--muted,#888)">Gestor de Tienda · Desarrollado por Analista de sistemas Eber Romero</div>';
+const cols = (a, b) => `<div class="cols c2e"><div>${a.join('')}</div><div>${b.join('')}</div></div>${sig}`;
+const soloDueno = () => `<div class="card"><div class="empty">${ic('lock')}<b>Solo el dueño</b>Esta sección la administra el dueño de la tienda.</div></div>`;
+const PAGES = {
+  ajustes: c => cols([c.datos, c.cuenta, c.pin], [c.equipo, c.perm, c.demo]),
+  apariencia: c => c.apar ? cols([c.apar], []) : soloDueno(),
+  tasa: c => cols([c.tasa], []),
+  cobros: c => c.cobros ? cols([c.cobros], []) : soloDueno(),
+  respaldos: c => c.resp2 ? cols([c.resp2], [c.resp1]) : soloDueno(),
+  sistema: c => cols([c.sync], [c.ver])
+};
+vAjustes = function () { return PAGES.ajustes(ajCards()); };
+const NEWR = { apariencia: ['Apariencia', 'tag'], tasa: ['Tasa del día', 'trend'], cobros: ['Recordatorios de cobro', 'alert', 'Cobros'], respaldos: ['Respaldos', 'download'], sistema: ['Versión y sincronización', 'share', 'Sincronización'] };
+ROUTES.ajustes.v = vAjustes; ROUTES.ajustes.t = 'Ajustes del negocio';
+for (const k in NEWR) ROUTES[k] = { t: NEWR[k][0], i: NEWR[k][1], n: NEWR[k][2], v: () => PAGES[k](ajCards()), after: k === 'sistema' ? () => refreshSyncInfo() : undefined };
+const OWNER_ONLY = ['apariencia', 'cobros', 'respaldos'];
+const GRUPOS = [['', ['inicio', 'vender', 'inventario', 'creditos', 'caja', 'historial', 'catalogo']], ['Configuración', ['ajustes', 'apariencia', 'tasa', 'cobros', 'respaldos', 'sistema']]];
+const _bn = buildNav; buildNav = function () {
+  _bn();
+  $('#side-nav').innerHTML = GRUPOS.map(([t, ks]) => (t ? `<div class="navh">${t}</div>` : '') + ks.filter(k => ROUTES[k] && (isOwner() || !OWNER_ONLY.includes(k))).map(k => `<a data-act="go" data-r="${k}" data-nav="${k}">${ic(ROUTES[k].i)}<span>${ROUTES[k].n || ROUTES[k].t}</span></a>`).join('')).join('');
+};
+vMas = function () {
+  const tile = (k, l, i) => `<div class="tile" data-act="go" data-r="${k}">${ic(i || ROUTES[k].i)}${l || ROUTES[k].n || ROUTES[k].t}</div>`, own = isOwner();
+  return `<div class="navh" style="padding:0 2px 8px">Gestión</div><div class="tiles">${tile('historial')}${tile('catalogo')}${tile('caja')}${tile('inicio', 'Resumen', 'home')}</div>
+  <div class="navh" style="padding:18px 2px 8px">Configuración</div><div class="tiles">${tile('ajustes')}${own ? tile('apariencia') : ''}${tile('tasa')}${own ? tile('cobros', 'Recordatorios de cobro') : ''}${own ? tile('respaldos') : ''}${tile('sistema', 'Versión y sincronización')}</div>`;
+};
+ROUTES.mas.v = vMas;
+if (L && L.token) { try { buildNav(); } catch { } }
