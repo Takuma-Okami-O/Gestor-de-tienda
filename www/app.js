@@ -60,7 +60,7 @@ const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hid
 /* ---------- estado y persistencia (IndexedDB) ---------- */
 const DEFAULT = () => ({
   v: 1,
-  config: { nombre: 'Mi Negocio', slogan: '', whatsapp: '', direccion: '', idFiscal: '', moneda: '$', tema: (window.BIZ && BIZ.tema) || 'indigo', pie: '¡Gracias por su compra!', logo: '', catalogUrl: '' },
+  config: { nombre: 'Mi Negocio', slogan: '', whatsapp: '', direccion: '', idFiscal: '', moneda: '$', tema: (window.BIZ && BIZ.tema) || 'rosasuave', color: '', pie: '¡Gracias por su compra!', logo: '', catalogUrl: '' },
   categorias: ['Damas', 'Caballeros', 'Calzado', 'Accesorios'],
   productos: [], clientes: [], facturas: [], movs: []
 });
@@ -148,14 +148,26 @@ function inkFor(hex) { const n = parseInt(hex.slice(1), 16); const l = (0.299 * 
 /* ---------- temas por tienda ---------- */
 const BIZ_A = (window.BIZ && BIZ.assets) || {};
 const THEMES = {
-  tesanz: { n: 'Tesanz · Vino y crema', brand: true, serif: true, color: '#74204A', bg: '#F5F1EA', side: '#3B0F24', ink: '#2B1520', text: '#3A2A31', muted: '#85737A', line: '#E8DFD4', lockA: '#74204A', lockB: '#2E0A1B', full: BIZ_A.full, wide: BIZ_A.wide, mark: BIZ_A.mark },
-  indigo: { n: 'Índigo', color: '#4F46E5', bg: '#F4F5F9', side: '#0F172A' },
-  esmeralda: { n: 'Esmeralda', color: '#0F766E', bg: '#F1F6F5', side: '#0B2B28' },
-  rosa: { n: 'Rosa', color: '#BE185D', bg: '#FBF3F6', side: '#3B0A21' },
-  dorado: { n: 'Dorado', color: '#B45309', bg: '#FAF6EE', side: '#2B1A08' },
-  azul: { n: 'Azul marino', color: '#1D4ED8', bg: '#F2F5FB', side: '#0B1B3F' }
+  tesanz: { n: 'Tesanz · Vino y crema', brand: true, serif: true, color: '#74204A', bg: '#F5F1EA', side: '#3B0F24', ink: '#2B1520', text: '#3A2A31', muted: '#85737A', line: '#E8DFD4', lockA: '#74204A', lockB: '#2E0A1B', full: BIZ_A.full, wide: BIZ_A.wide, mark: BIZ_A.mark }
 };
-const themeOf = () => THEMES[S.config.tema] || THEMES.indigo;
+/* paleta: cada color genera automáticamente fondo, barra lateral y bordes con su mismo matiz */
+const PALETA = [
+  ['rosasuave', 'Rosa suave', '#B8527F'], ['rosa', 'Rosa', '#BE185D'], ['fucsia', 'Fucsia', '#C026D3'], ['coral', 'Coral', '#E2553F'],
+  ['rojo', 'Rojo', '#C62828'], ['terracota', 'Terracota', '#B4562F'], ['naranja', 'Naranja', '#D9710A'], ['dorado', 'Dorado', '#B45309'],
+  ['mostaza', 'Mostaza', '#A98307'], ['oliva', 'Oliva', '#6B7A1F'], ['verde', 'Verde', '#2E7D32'], ['esmeralda', 'Esmeralda', '#0F766E'],
+  ['turquesa', 'Turquesa', '#0E8FA3'], ['cielo', 'Cielo', '#0284C7'], ['azul', 'Azul marino', '#1D4ED8'], ['indigo', 'Índigo', '#4F46E5'],
+  ['violeta', 'Violeta', '#7C3AED'], ['lavanda', 'Lavanda', '#8B6FB8'], ['vino', 'Vino', '#7A1F4A'], ['cafe', 'Café', '#7B4A2B'],
+  ['grafito', 'Grafito', '#475569'], ['negro', 'Negro elegante', '#1F2937']
+];
+function hex2hsl(hex) { const n = parseInt(hex.slice(1), 16), r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255, mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; let h = 0; if (d) { if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4; h = (h * 60 + 360) % 360; } const l = (mx + mn) / 2; return [h, d ? d / (1 - Math.abs(2 * l - 1)) : 0, l]; }
+function hsl2hex(h, s, l) { s = Math.max(0, Math.min(1, s)); l = Math.max(0, Math.min(1, l)); const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l), f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1))); return '#' + [f(0), f(8), f(4)].map(v => pad(Math.round(v * 255).toString(16))).join(''); }
+function deriveTheme(name, hex) {
+  const [h, sat] = hex2hsl(hex), neutral = sat < .12, s1 = neutral ? .06 : Math.min(.5, sat * .55);
+  return { n: name, color: hex, bg: hsl2hex(h, s1 * .55 + .04, .965), side: hsl2hex(h, neutral ? .08 : Math.min(.55, sat * .7), .13), ink: hsl2hex(h, .3, .12), text: hsl2hex(h, .18, .2), muted: hsl2hex(h, .09, .45), line: hsl2hex(h, .14, .90) };
+}
+PALETA.forEach(([k, n, c]) => { THEMES[k] = deriveTheme(n, c); });
+const validHex = v => /^#[0-9a-fA-F]{6}$/.test(String(v || ''));
+const themeOf = () => S.config.tema === 'custom' && validHex(S.config.color) ? deriveTheme('Personalizado', S.config.color) : (THEMES[S.config.tema] || THEMES.rosasuave);
 const accent = () => themeOf().color;
 const logoPrint = () => S.config.logo || themeOf().wide || '';
 const markHTML = () => { const src = S.config.logo || themeOf().mark; return src ? `<img src="${src}" alt="">` : esc(initials(S.config.nombre)); };
@@ -230,7 +242,7 @@ function vInicio() {
   const gananciaMes = sum(fs.filter(f => ymd(f.fecha).startsWith(mes)).map(f => f.ganancia || 0));
   const cobradoHoy = sum(fs.flatMap(f => f.abonos).filter(a => ymd(a.fecha) === hoy).map(a => a.monto));
   const porCobrar = sum(fs.map(saldo)), venc = sum(fs.filter(vencida).map(saldo));
-  const invCosto = sum(S.productos.map(p => p.stock * p.costo)), invVenta = sum(S.productos.map(p => p.stock * p.precio));
+  const invCosto = sum(S.productos.map(p => p.stock * (p.costo || 0))), invVenta = sum(S.productos.map(p => p.stock * p.precio));
   const unidades = sum(S.productos.map(p => p.stock));
   const dias = [...Array(7)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() - (6 - i)); const k = ymd(d.toISOString()); return { k, l: d.toLocaleDateString('es-VE', { weekday: 'short' }).replace('.', ''), t: sum(fs.filter(f => ymd(f.fecha) === k).map(f => f.total)), hoy: i === 6 }; });
   const mx = Math.max(...dias.map(d => d.t), 1);
@@ -283,7 +295,7 @@ function vInventario() {
   <div class="kpis">
     <div class="kpi"><span class="ico">${ic('box')}</span><div class="kl">Productos</div><div class="kv">${S.productos.length}</div><div class="ks">${S.categorias.length} categorías</div></div>
     <div class="kpi"><span class="ico">${ic('tag')}</span><div class="kl">Unidades</div><div class="kv">${sum(S.productos.map(p => p.stock))}</div><div class="ks">en existencia</div></div>
-    <div class="kpi"><span class="ico">${ic('wallet')}</span><div class="kl">Valor a precio venta</div><div class="kv">${money(sum(S.productos.map(p => p.stock * p.precio)))}</div><div class="ks">${isOwner() ? 'Costo: ' + money(sum(S.productos.map(p => p.stock * p.costo))) : '&nbsp;'}</div></div>
+    <div class="kpi"><span class="ico">${ic('wallet')}</span><div class="kl">Valor a precio venta</div><div class="kv">${money(sum(S.productos.map(p => p.stock * p.precio)))}</div><div class="ks">${isOwner() ? 'Costo: ' + money(sum(S.productos.map(p => p.stock * (p.costo || 0)))) : '&nbsp;'}</div></div>
     <div class="kpi"><span class="ico" style="background:var(--warn-soft);color:var(--warn)">${ic('alert')}</span><div class="kl">Stock bajo</div><div class="kv">${bajos}</div><div class="ks">requieren reposición</div></div>
   </div>
   <div class="row wrap" style="margin-bottom:10px">
@@ -429,9 +441,9 @@ function checkout() {
   for (const l of c.lines) if (l.qty > l.p.stock) return toast(`Stock insuficiente de "${l.p.nombre}"`, 'err');
   const cli = cart.clienteId ? cliente(cart.clienteId) : null;
   if (cart.tipo === 'CREDITO' && !cli) return toast('Selecciona o crea un cliente para vender a crédito', 'err');
-  const now = new Date().toISOString(), costoTot = sum(c.lines.map(l => l.p.costo * l.qty));
+  const now = new Date().toISOString(), costoTot = sum(c.lines.map(l => (l.p.costo || 0) * l.qty));
   const f = { id: uid(), num: nextNum(), fecha: now, clienteId: cli ? cli.id : '', clienteNombre: cli ? cli.nombre : 'Cliente de mostrador',
-    items: c.lines.map(l => ({ pid: l.pid, nombre: l.p.nombre, variante: l.p.variante || '', precio: l.p.precio, costo: l.p.costo, qty: l.qty })),
+    items: c.lines.map(l => ({ pid: l.pid, nombre: l.p.nombre, variante: l.p.variante || '', precio: l.p.precio, costo: l.p.costo || 0, qty: l.qty })),
     subtotal: c.subtotal, descPct: c.pct, desc: c.desc, total: c.total, tipo: cart.tipo, metodo: cart.metodo, vence: cart.tipo === 'CREDITO' ? cart.vence : '', abonos: [], estado: 'PAGADA', ganancia: r2(c.total - costoTot) };
   if (cart.tipo === 'CONTADO') f.abonos.push({ id: uid(), fecha: now, monto: c.total, metodo: cart.metodo, nota: 'Pago al contado' });
   else { if (c.abono > 0) f.abonos.push({ id: uid(), fecha: now, monto: c.abono, metodo: cart.metodo, nota: 'Abono inicial' }); f.estado = c.saldo > 0 ? 'PENDIENTE' : 'PAGADA'; }
@@ -675,7 +687,9 @@ function vAjustes() {
     <div class="f"><label class="l">Dirección</label><input class="in" data-input="cfg" data-k="direccion" value="${esc(c.direccion)}"></div>
     <div class="row"><div class="f" style="max-width:130px"><label class="l">Símbolo de moneda</label><input class="in" data-input="cfg" data-k="moneda" value="${esc(c.moneda)}" maxlength="4"></div><div class="f"><label class="l">Mensaje al pie de la factura</label><input class="in" data-input="cfg" data-k="pie" value="${esc(c.pie)}"></div></div></div>
   <div class="card"><h3>${ic('tag')} Apariencia</h3><label class="l">Tema de color</label>
-    <div class="themes">${themes.map(([k, t]) => `<div class="theme ${c.tema === k ? 'on' : ''}" data-act="tema" data-t="${k}"><div class="sw3"><i style="background:${t.color}"></i><i style="background:${t.side}"></i><i style="background:${t.bg}"></i></div>${esc(t.n)}</div>`).join('')}</div>
+    <div class="themes">${themes.map(([k, t]) => `<div class="theme ${c.tema === k ? 'on' : ''}" data-act="tema" data-t="${k}"><div class="sw3"><i style="background:${t.color}"></i><i style="background:${t.side}"></i><i style="background:${t.bg}"></i></div>${esc(t.n)}</div>`).join('')}
+      <div class="theme ${c.tema === 'custom' ? 'on' : ''}"><label class="cust"><input type="color" data-input="tcolor" value="${validHex(c.color) ? c.color : accent()}"><span>Color a tu gusto</span></label></div></div>
+    <div class="hint small" style="margin-top:8px">Solo el dueño puede cambiar el tema. Todos los equipos de la tienda (empleados incluidos) se actualizan solos al sincronizar.</div>
     <div class="f" style="margin-top:16px"><label class="l">Logo propio (reemplaza al del tema)</label><div class="row"><div class="logo ${!c.logo && themeOf().mark ? 'mark' : ''}" style="width:56px;height:56px;border-radius:14px;font-size:20px">${markHTML()}</div><button class="btn soft sm" data-act="logoPick">${ic('image')} Subir logo</button>${c.logo ? '<button class="btn danger sm" data-act="logoDel">Quitar</button>' : ''}</div></div></div>` : ''}
   <div class="card"><h3>${ic('users')} Mi cuenta</h3>
     <dl class="kv2" style="margin-bottom:12px"><dt>Nombre</dt><dd>${esc(L.user?.nombre || '')}</dd><dt>Correo</dt><dd>${esc(L.user?.email || '')}</dd><dt>Rol</dt><dd>${owner ? 'Dueño' : 'Empleado'}</dd></dl>
@@ -731,7 +745,7 @@ const ACT = {
   qrSave: () => { if (!qrText()) return toast('Primero configura el QR', 'err'); const c = document.createElement('canvas'); drawQR(c, qrText(), 800); c.toBlob(b => saveFile('qr.png', b, 'image/png'), 'image/png'); },
   qrPoster,
   logoPick: () => pickImage(s => { S.config.logo = s; save(); applyTheme(); render(); }, 300), logoDel: () => { S.config.logo = ''; save(); applyTheme(); render(); },
-  tema: d => { S.config.tema = d.t; save(); applyTheme(); render(); },
+  tema: d => { if (!isOwner()) return; S.config.tema = d.t; save(); applyTheme(); render(); },
   pinSave: async () => { const v = $('#pin-in').value.trim(); if (!/^\d{4,6}$/.test(v)) return toast('El PIN debe tener 4 a 6 números', 'err'); L.pin = await sha(v); saveLocal(); toast('PIN guardado', 'ok'); render(); },
   pinDel: () => { L.pin = ''; saveLocal(); toast('PIN eliminado', 'ok'); render(); },
   backup: () => saveFile(`respaldo-${S.config.nombre.replace(/\W+/g, '-')}-${todayStr()}.json`, JSON.stringify(S), 'application/json'),
@@ -745,6 +759,7 @@ const INP = {
   pmCalc, catRename: e => { const i = +e.target.dataset.i, old = S.categorias[i], v = e.target.value.trim(); if (!v || v === old) return; S.productos.forEach(p => { if (p.categoria === old) p.categoria = v; }); S.categorias[i] = v; save(); },
   cartCli: e => { cart.clienteId = e.target.value; }, cartDesc: e => { cart.desc = e.target.value; updateTotals(); }, cartAbono: e => { cart.abono = e.target.value; updateTotals(); },
   cartMetodo: e => { cart.metodo = e.target.value; }, cartVence: e => { cart.vence = e.target.value; },
+  tcolor: e => { if (!isOwner()) return; S.config.tema = 'custom'; S.config.color = e.target.value; save(); applyTheme(); },
   qrUrl: e => { S.config.catalogUrl = e.target.value; save(); renderQR(); },
   cfg: e => { S.config[e.target.dataset.k] = e.target.value; save(); if (e.target.dataset.k === 'nombre') { applyTheme(); const l = $('#set-logo'); if (l && !S.config.logo) l.textContent = initials(S.config.nombre); } }
 };

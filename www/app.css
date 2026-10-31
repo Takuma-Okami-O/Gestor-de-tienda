@@ -275,3 +275,5 @@ table.t td.r,table.t th.r{text-align:right}
 .dev{margin-top:10px;font-size:10.5px;line-height:1.35;opacity:.65;letter-spacing:.2px}
 .loginbox .dev{margin-top:18px;text-align:center;color:var(--muted,#888);opacity:.8}
 .ft .dev{margin-top:4px}
+.themes{grid-template-columns:repeat(auto-fill,minmax(104px,1fr))}
+.theme .cust{display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer}.theme .cust input{width:100%;height:26px;border:0;padding:0;border-radius:8px;background:none;cursor:pointer}

@@ -58,30 +58,111 @@ begin
                             'store', jsonb_build_object('id', s.id, 'nombre', s.nombre));
 end $$;
 
--- Sincronización: recibe cambios (push) y devuelve lo nuevo desde 'since'
+-- Columna para evitar aplicar dos veces un mismo cambio de stock si se reintenta un envío
+alter table public.records add column if not exists op text;
+
+-- Datos que un empleado NO debe recibir (costos y márgenes)
+create or replace function public._strip(col text, d jsonb) returns jsonb
+language plpgsql immutable as $$
+begin
+  if d is null then return d; end if;
+  if col = 'productos' then return d - 'costo' - 'margen'; end if;
+  if col = 'facturas' then
+    return (d - 'ganancia') || jsonb_build_object('items', coalesce((select jsonb_agg(i - 'costo') from jsonb_array_elements(coalesce(d->'items', '[]'::jsonb)) i), '[]'::jsonb));
+  end if;
+  return d;
+end $$;
+
+-- Une los abonos de dos versiones de una factura y recalcula su estado
+create or replace function public._merge_factura(base jsonb, other jsonb) returns jsonb
+language plpgsql immutable as $$
+declare ab jsonb; pag numeric; tot numeric; est text;
+begin
+  select coalesce(jsonb_agg(a order by a->>'fecha'), '[]'::jsonb) into ab from (
+    select distinct on (a->>'id') a from (
+      select jsonb_array_elements(coalesce(base->'abonos', '[]'::jsonb)) a union all select jsonb_array_elements(coalesce(other->'abonos', '[]'::jsonb))) x
+    order by a->>'id') y;
+  select coalesce(sum((a->>'monto')::numeric), 0) into pag from jsonb_array_elements(ab) a;
+  tot := coalesce((base->>'total')::numeric, 0);
+  est := case when base->>'estado' = 'ANULADA' or other->>'estado' = 'ANULADA' then 'ANULADA'
+              when tot - pag <= 0.004 then 'PAGADA' else 'PENDIENTE' end;
+  return base || jsonb_build_object('abonos', ab, 'estado', est);
+end $$;
+
+-- Sincronización: recibe cambios (push) y devuelve lo nuevo desde 'since'.
+--  · Stock: se envía como DIFERENCIA (ds) y se suma al stock del servidor → dos equipos vendiendo a la vez no se pisan.
+--  · Facturas: los abonos de todos los equipos se unen; un equipo que anula, anula.
+--  · Empleados: no reciben costos ni márgenes, y no pueden alterarlos.
 create or replace function public.sync(since bigint, push jsonb) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
-  p public.profiles; it jsonb; c text; rid text; uu bigint; dd boolean; ex public.records;
-  cur bigint; rej jsonb := '[]'::jsonb; den jsonb := '[]'::jsonb; mine text[] := '{}';
-  recs jsonb := '[]'::jsonb; rows jsonb; n int; lim int := 400; more boolean := false; lastseq bigint; r record;
+  p public.profiles; it jsonb; c text; rid text; uu bigint; dd boolean; ex public.records; found_ex boolean; stale boolean;
+  nd jsonb; ds numeric; opid text; isowner boolean; cur bigint; rej jsonb := '[]'::jsonb; den jsonb := '[]'::jsonb; mine text[] := '{}';
+  recs jsonb := '[]'::jsonb; more boolean := false; lastseq bigint; r record; n int; lim int := 400; mx int; costo numeric; gan numeric; itm jsonb; items jsonb; k text; val jsonb;
 begin
-  p := public._me();
+  p := public._me(); isowner := p.rol = 'owner';
   select seq into cur from public.stores where id = p.store_id for update; -- serializa por tienda
   for it in select * from jsonb_array_elements(coalesce(push, '[]'::jsonb)) loop
     c := it->>'c'; rid := it->>'id';
     if c is null or rid is null or length(rid) > 80 or c not in ('productos','clientes','facturas','movs','categorias','config') then continue; end if;
     begin uu := (it->>'u')::bigint; exception when others then continue; end;
-    if c in ('categorias','config') and p.rol <> 'owner' then den := den || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue; end if;
-    select * into ex from public.records where store_id = p.store_id and col = c and id = rid;
-    if found and ex.u > uu then rej := rej || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue; end if;
-    dd := coalesce((it->>'d')::int, 0) = 1 or coalesce(it->>'d','') = 'true';
+    if c in ('categorias','config') and not isowner then den := den || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue; end if;
+    dd := coalesce(it->>'d', '0') in ('1', 'true');
     if not dd and length((it->'data')::text) > 6000000 then continue; end if;
+    select * into ex from public.records where store_id = p.store_id and col = c and id = rid;
+    found_ex := found; stale := found_ex and ex.u > uu;
+    nd := case when dd then null else it->'data' end; opid := null; val := null;
+    ds := case when jsonb_typeof(it->'ds') = 'number' then (it->>'ds')::numeric else null end;
+
+    if not dd and c = 'productos' then
+      if found_ex and not ex.del and ex.data is not null then
+        if ds is not null then
+          if ex.op is not distinct from (it->>'op') and (it->>'op') is not null then ds := 0; end if; -- reintento ya aplicado
+          opid := it->>'op';
+          if stale then nd := ex.data; end if;
+          nd := jsonb_set(nd, '{stock}', to_jsonb(coalesce((ex.data->>'stock')::numeric, 0) + ds));
+          if stale then uu := ex.u; end if;
+          val := nd; -- se devuelve al equipo que envió
+        end if;
+        if not isowner then nd := nd || jsonb_build_object('costo', coalesce(ex.data->'costo', '0'::jsonb), 'margen', coalesce(ex.data->'margen', '0'::jsonb)); end if;
+      elsif not isowner then nd := nd || jsonb_build_object('costo', 0, 'margen', 0);
+      end if;
+    elsif not dd and c = 'facturas' then
+      if found_ex and not ex.del and ex.data is not null then
+        if not isowner or stale then
+          -- se conservan los montos y costos del servidor; solo se fusionan abonos y estado
+          nd := public._merge_factura(ex.data, nd);
+        else
+          nd := public._merge_factura(nd, ex.data);
+        end if;
+        if stale then uu := ex.u; end if;
+        val := nd;
+      else
+        -- número de factura repetido entre equipos → se reasigna el siguiente libre
+        if exists (select 1 from public.records f where f.store_id = p.store_id and f.col = 'facturas' and f.id <> rid and not f.del and f.data->>'num' = nd->>'num') then
+          select coalesce(max(nullif(regexp_replace(f.data->>'num', '\D', '', 'g'), '')::int), 0) into mx from public.records f where f.store_id = p.store_id and f.col = 'facturas' and not f.del;
+          nd := jsonb_set(nd, '{num}', to_jsonb('F-' || lpad((mx + 1)::text, 6, '0'))); val := nd;
+        end if;
+        if not isowner then -- costos reales desde el inventario del servidor
+          items := '[]'::jsonb; gan := 0;
+          for itm in select * from jsonb_array_elements(coalesce(nd->'items', '[]'::jsonb)) loop
+            select coalesce((x.data->>'costo')::numeric, 0) into costo from public.records x where x.store_id = p.store_id and x.col = 'productos' and x.id = itm->>'pid' and not x.del;
+            costo := coalesce(costo, 0); gan := gan + costo * coalesce((itm->>'qty')::numeric, 0);
+            items := items || jsonb_build_array(itm || jsonb_build_object('costo', costo));
+          end loop;
+          nd := nd || jsonb_build_object('items', items, 'ganancia', round(coalesce((nd->>'total')::numeric, 0) - gan, 2)); val := nd;
+        end if;
+      end if;
+    elsif stale then
+      rej := rej || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue;
+    end if;
+
+    if stale and val is null then rej := rej || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue; end if;
     cur := cur + 1;
-    insert into public.records (store_id, col, id, u, del, data, seq)
-    values (p.store_id, c, rid, uu, dd, case when dd then null else it->'data' end, cur)
-    on conflict (store_id, col, id) do update set u = excluded.u, del = excluded.del, data = excluded.data, seq = excluded.seq;
-    mine := mine || (c || '|' || rid);
+    insert into public.records (store_id, col, id, u, del, data, seq, op)
+    values (p.store_id, c, rid, uu, dd, nd, cur, opid)
+    on conflict (store_id, col, id) do update set u = excluded.u, del = excluded.del, data = excluded.data, seq = excluded.seq, op = coalesce(excluded.op, public.records.op);
+    if val is null then mine := mine || (c || '|' || rid); end if;
   end loop;
   update public.stores set seq = cur where id = p.store_id;
 
@@ -91,14 +172,16 @@ begin
     if n > lim then more := true; exit; end if;
     lastseq := r.seq;
     if not ((r.col || '|' || r.id) = any(mine)) then
-      recs := recs || jsonb_build_array(jsonb_build_object('c', r.col, 'id', r.id, 'u', r.u, 'd', r.del, 'data', case when r.del then null else r.data end));
+      recs := recs || jsonb_build_array(jsonb_build_object('c', r.col, 'id', r.id, 'u', r.u, 'd', r.del,
+        'data', case when r.del then null when isowner then r.data else public._strip(r.col, r.data) end));
     end if;
   end loop;
   -- rechazados: devolver la versión ganadora del servidor
   for it in select * from jsonb_array_elements(rej) loop
     select * into ex from public.records where store_id = p.store_id and col = it->>'c' and id = it->>'id';
     if found and not (recs @> jsonb_build_array(jsonb_build_object('c', ex.col, 'id', ex.id))) then
-      recs := recs || jsonb_build_array(jsonb_build_object('c', ex.col, 'id', ex.id, 'u', ex.u, 'd', ex.del, 'data', case when ex.del then null else ex.data end));
+      recs := recs || jsonb_build_array(jsonb_build_object('c', ex.col, 'id', ex.id, 'u', ex.u, 'd', ex.del,
+        'data', case when ex.del then null when isowner then ex.data else public._strip(ex.col, ex.data) end));
     end if;
   end loop;
   return jsonb_build_object('cursor', case when more then lastseq else cur end, 'more', more, 'recs', recs,
@@ -145,6 +228,21 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
+-- El dueño cambia la contraseña de un empleado (y se cierran sus sesiones)
+create or replace function public.team_set_password(uid uuid, nueva text) returns jsonb
+language plpgsql security definer set search_path = public, extensions, auth as $$
+declare p public.profiles;
+begin
+  p := public._me();
+  if p.rol <> 'owner' then raise exception 'Solo el dueño puede administrar usuarios'; end if;
+  if uid = p.id then raise exception 'Cambia tu propia contraseña desde Mi cuenta'; end if;
+  if length(coalesce(nueva, '')) < 8 then raise exception 'La contraseña debe tener al menos 8 caracteres'; end if;
+  if not exists (select 1 from public.profiles where id = uid and store_id = p.store_id) then raise exception 'Usuario no encontrado'; end if;
+  update auth.users set encrypted_password = extensions.crypt(nueva, extensions.gen_salt('bf')), updated_at = now() where id = uid;
+  delete from auth.sessions where user_id = uid;
+  return jsonb_build_object('ok', true);
+end $$;
+
 -- Crear una tienda (la ejecutas TÚ desde el SQL Editor). Antes crea el usuario dueño en
 -- Authentication > Users > Add user (marca "Auto Confirm User").
 create or replace function public.crear_tienda(nombre_tienda text, email_dueno text, nombre_dueno text, tema text default 'indigo') returns text
@@ -169,5 +267,8 @@ revoke all on function public.sync(bigint, jsonb) from public, anon;
 revoke all on function public.team_list() from public, anon;
 revoke all on function public.team_add(uuid, text, text) from public, anon;
 revoke all on function public.team_update(uuid, text, text, boolean) from public, anon;
+revoke all on function public.team_set_password(uuid, text) from public, anon;
+revoke all on function public._strip(text, jsonb) from public, anon, authenticated;
+revoke all on function public._merge_factura(jsonb, jsonb) from public, anon, authenticated;
 grant execute on function public.me(), public.sync(bigint, jsonb), public.team_list(),
-  public.team_add(uuid, text, text), public.team_update(uuid, text, text, boolean) to authenticated;
+  public.team_add(uuid, text, text), public.team_update(uuid, text, text, boolean), public.team_set_password(uuid, text) to authenticated;

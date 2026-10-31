@@ -7,7 +7,7 @@
    ===================================================================== */
 
 /* ---------- estado local del dispositivo (no se sincroniza) ---------- */
-let L = { pin: '', token: '', refresh: '', exp: 0, user: null, store: null, server: '', tema: '', nombre: '' };
+let L = { dev: '', pin: '', token: '', refresh: '', exp: 0, user: null, store: null, server: '', tema: '', nombre: '' };
 // Y = bookkeeping de sincronización: cursor del servidor y metadatos por registro
 let Y = { cursor: 0, meta: {}, storeId: '', last: 0, pulled: false, skew: 0 };
 const COLS = ['productos', 'clientes', 'facturas', 'movs'];
@@ -100,7 +100,7 @@ async function sbApi(path, body, method) {
     return rpc('team_add', { uid, nombre, rol: body.rol === 'owner' ? 'owner' : 'employee' });
   }
   const um = path.match(/^\/api\/users\/([\w-]+)$/);
-  if (um) return rpc('team_update', { uid: um[1], nombre: body.nombre, rol: body.rol, active: body.active });
+  if (um) { const r = await rpc('team_update', { uid: um[1], nombre: body.nombre, rol: body.rol, active: body.active }); if (body.password) await rpc('team_set_password', { uid: um[1], nueva: body.password }); return r; }
   throw new Error('Operación no soportada');
 }
 
@@ -142,8 +142,11 @@ function collectPush(maxRecs = 150, maxBytes = 3e6) {
       if (items.length >= maxRecs || bytes > maxBytes) return { items, snap };
       let rec = null;
       if (!m.d) { rec = SINGLE.includes(col) ? singleData(col) : S[col].find(x => x.id === id); if (!rec) continue; bytes += JSON.stringify(rec).length; }
-      items.push({ c: col, id, u: m.u, d: m.d ? 1 : 0, data: m.d ? null : rec });
-      snap.push({ c: col, id, u: m.u, h: m.h });
+      const it = { c: col, id, u: m.u, d: m.d ? 1 : 0, data: m.d ? null : rec };
+      // stock como diferencia respecto al último valor sincronizado: ventas simultáneas en varios equipos se suman, no se pisan
+      if (col === 'productos' && !m.d && m.sb !== undefined) { it.ds = (+rec.stock || 0) - m.sb; it.op = (L.dev || '') + ':' + m.u + ':' + m.sb; }
+      items.push(it);
+      snap.push({ c: col, id, u: m.u, h: m.h, st: col === 'productos' && rec ? (+rec.stock || 0) : undefined });
     }
   }
   return { items, snap };
@@ -152,7 +155,9 @@ function markPushed(batch, resp) {
   const rej = new Set((resp.rejected || []).map(x => x.c + '|' + x.id));
   for (const s of batch.snap) {
     if (rej.has(s.c + '|' + s.id)) continue;
-    const m = (Y.meta[s.c] || {})[s.id]; if (m && m.u === s.u && m.h === s.h) m.s = 1;
+    const m = (Y.meta[s.c] || {})[s.id]; if (!m) continue;
+    if (s.st !== undefined) m.sb = s.st; // base para el próximo envío de diferencia
+    if (m.u === s.u && m.h === s.h) m.s = 1;
   }
 }
 function applyRecs(recs) {
@@ -172,7 +177,7 @@ function applyRecs(recs) {
     if (r.d) { if (idx > -1) arr.splice(idx, 1); meta[r.id] = { u: r.u, h: '', s: 1, d: 1 }; changed = true; continue; }
     const rec = r.data; if (!rec || typeof rec !== 'object') continue; rec.id = r.id;
     if (idx > -1) arr[idx] = rec; else arr.push(rec);
-    meta[r.id] = { u: r.u, h: hstr(hashRec(r.c, rec)), s: 1 }; changed = true;
+    meta[r.id] = { u: r.u, h: hstr(hashRec(r.c, rec)), s: 1 }; if (r.c === 'productos') meta[r.id].sb = +rec.stock || 0; changed = true;
   }
   if (changed) {
     const byDate = (a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''));
@@ -321,8 +326,8 @@ async function doLogout() {
   if (hasPending() && !confirm(`Hay ${pendingCount()} cambio(s) sin enviar a la nube. Si cierras sesión se perderán. ¿Cerrar sesión de todos modos?`)) return;
   try { if (L.token) await api('/api/logout', {}); } catch { }
   clearInterval(loopT); clearTimeout(syncT);
-  const keep = { tema: S.config.tema, nombre: S.config.nombre };
-  S = DEFAULT(); S.config.tema = keep.tema; Y = { cursor: 0, meta: {}, storeId: '', last: 0, pulled: false, skew: 0 };
+  const keep = { tema: S.config.tema, color: S.config.color, nombre: S.config.nombre };
+  S = DEFAULT(); S.config.tema = keep.tema; S.config.color = keep.color; Y = { cursor: 0, meta: {}, storeId: '', last: 0, pulled: false, skew: 0 };
   const email = L.user?.email; L.token = ''; L.refresh = ''; L.exp = 0; L.user = null; L.store = null; L.pin = ''; L.lastEmail = email || L.lastEmail;
   await IDB.set('state', S); await IDB.set('sync', Y); await saveLocal();
   entered = false; location.hash = ''; showLogin();
@@ -342,7 +347,7 @@ function userModal(u) {
     <div class="f"><label class="l">Nombre</label><input class="in" id="us-nom" value="${esc(u?.nombre || '')}" placeholder="Ej. María (caja)"></div>
     <div class="f"><label class="l">Correo (será su usuario)</label><input class="in" id="us-email" type="email" ${u ? 'disabled' : ''} value="${esc(u?.email || '')}" inputmode="email" autocapitalize="none"></div>
     <div class="f"><label class="l">Rol</label><select class="in" id="us-rol"><option value="employee" ${u?.rol !== 'owner' ? 'selected' : ''}>Empleado — vende, factura y cobra; no ve costos ni ajustes</option><option value="owner" ${u?.rol === 'owner' ? 'selected' : ''}>Dueño — acceso total</option></select></div>
-    ${u && SB() ? '' : `<div class="f"><label class="l">${u ? 'Nueva contraseña (déjala vacía para no cambiarla)' : 'Contraseña (mín. 8)'}</label><div class="row"><input class="in" id="us-pw" type="text" autocomplete="off" placeholder="${u ? '••••••••' : ''}"><button class="btn soft" type="button" style="flex:none" data-act="pwGen">Generar</button></div></div>`}
+    ${`<div class="f"><label class="l">${u ? 'Nueva contraseña (déjala vacía para no cambiarla)' : 'Contraseña (mín. 8)'}</label><div class="row"><input class="in" id="us-pw" type="text" autocomplete="off" placeholder="${u ? '••••••••' : ''}"><button class="btn soft" type="button" style="flex:none" data-act="pwGen">Generar</button></div></div>`}
     ${u ? `<label class="row" style="cursor:pointer"><input type="checkbox" id="us-act" style="width:20px;height:20px;accent-color:var(--accent)" ${u.active ? 'checked' : ''}><span class="b">Cuenta activa</span></label>` : ''}
     <div class="hint small" style="margin-top:12px">Entrégale el correo y la contraseña a la persona. Al cambiar una contraseña se cierran sus sesiones abiertas.</div>
     <div class="dfoot"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="userSave" data-id="${u ? u.id : ''}">${ic('check')} Guardar</button></div>`);
@@ -381,6 +386,7 @@ function registerSW() { if ('serviceWorker' in navigator && /^https?:$/.test(loc
     const y = await IDB.get('sync'); if (y) Y = Object.assign(Y, y);
   } catch (e) { console.warn('IDB', e); }
   try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch { }
+  if (!L.dev) { L.dev = Math.random().toString(36).slice(2, 10); saveLocal(); }
   applyTheme(); registerSW();
   if (!L.token) showLogin(); else if (L.pin) showPin(); else enterApp();
 })();

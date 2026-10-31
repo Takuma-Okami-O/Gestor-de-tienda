@@ -35,10 +35,17 @@ Copia `www/config.example.js` a `www/config.js`: `supabase` (url y key), `tema`,
 ## 3. Compilar APK / escritorio
 `npm install` → `npx cap add android && npx cap sync` (APK) · `npm run electron:build` (escritorio). O usa el workflow de GitHub Actions `.github/workflows/build.yml`. Supabase ya es HTTPS.
 
+## Cómo se evitan los conflictos (Supabase)
+- **Stock:** cada equipo envía la *diferencia* de stock (no el número final) y el servidor la suma; ventas simultáneas, incluso sin conexión, no se pisan. Un reintento de envío no resta dos veces.
+- **Abonos:** los pagos de todos los equipos se unen y el estado (pendiente/pagada) se recalcula. Si un equipo anula la factura, queda anulada.
+- **Números de factura:** si dos equipos usan el mismo, el servidor reasigna el siguiente libre.
+- **Costos y ganancias:** el servidor NO los envía a los empleados ni les deja modificarlos; la ganancia de sus ventas la calcula el servidor con el costo real.
+- **Contraseña de un empleado:** el dueño la cambia en Ajustes > Equipo (se cierran sus sesiones).
+- **Tema/colores:** solo el dueño los cambia; todos los equipos se actualizan al sincronizar.
+
 ## Límites conocidos
-- Sincronización por registro, última escritura gana: dos equipos vendiendo el mismo producto sin conexión pueden descuadrar stock.
-- Los empleados ocultan costos en la interfaz, pero sus equipos reciben esos datos.
-- Números de factura podrían repetirse si dos equipos facturan offline a la vez.
-- La "factura" es un comprobante interno, no fiscal.
-- Con Supabase, el dueño no puede cambiar la contraseña de un empleado: si la olvida, desactiva la cuenta y crea otra con otro correo (o cámbiala en Authentication > Users).
+- Si dos equipos anulan la MISMA factura a la vez sin conexión, el stock se repone dos veces.
+- La edición de otros campos (nombre, precio…) sigue siendo "gana el último cambio".
 - Para entrar sin conexión hace falta haber iniciado sesión antes en ese equipo.
+- La "factura" es un comprobante interno, no fiscal.
+- Supabase gratis: pausa el proyecto tras 1 semana sin uso; haz copias periódicas.
