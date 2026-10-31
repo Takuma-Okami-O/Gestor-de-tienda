@@ -483,4 +483,7 @@ const _fm3 = facModal; facModal = function (id, nueva) {
   _fm3(id, nueva); const f = factura(id); if (!f) return; const dlg = [...$$('.dialog')].pop(), w = dlg && $('[data-act=facWA]', dlg);
   if (w) w.insertAdjacentHTML('beforebegin', `<button class="btn soft" data-act="facImg" data-id="${f.id}">${ic('image')} Imagen (PNG)</button>`);
   const pr = dlg && $('[data-act=facPrint]', dlg); if (pr && isNative()) pr.remove();
+  if (!isNative() && window.ClipboardItem && navigator.clipboard && w) w.insertAdjacentHTML('beforebegin', `<button class="btn soft" data-act="facCopy" data-id="${f.id}">${ic('copy')} Copiar imagen</button>`);
 };
+
+ACT.facCopy = async d => { const f = factura(d.id); if (!f) return; toast('Generando imagen…'); try { const b = await htmlToPng(facHTML(f)); await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]); toast('Imagen copiada: pégala (Ctrl+V) en WhatsApp Web o donde quieras', 'ok'); } catch (e) { toast('No se pudo copiar; usa «Imagen (PNG)» para guardarla', 'err'); } };
