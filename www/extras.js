@@ -212,7 +212,7 @@ const UPD = {
   },
   banner() {
     if ($('#upd-bar')) return; const b = document.createElement('div'); b.id = 'upd-bar';
-    b.style.cssText = 'position:fixed;left:12px;right:12px;bottom:78px;z-index:99;background:var(--ink,#222);color:#fff;border-radius:14px;padding:12px 14px;display:flex;gap:10px;align-items:center;box-shadow:0 8px 30px rgba(0,0,0,.3)';
+    b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);width:calc(100% - 24px);max-width:560px;bottom:78px;z-index:99;background:var(--ink,#222);color:#fff;border-radius:14px;padding:12px 14px;display:flex;gap:10px;align-items:center;box-shadow:0 8px 30px rgba(0,0,0,.3)';
     b.innerHTML = '<span style="flex:1">✨ Hay una versión nueva de Gestor de Tienda</span><button class="btn sm" id="upd-go">Actualizar</button>'; document.body.appendChild(b);
     $('#upd-go').onclick = async () => { await saveNow(); try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); const rg = await navigator.serviceWorker.getRegistration(); if (rg) await rg.unregister(); } catch { } location.reload(); };
   }

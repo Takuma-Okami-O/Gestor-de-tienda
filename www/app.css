@@ -283,3 +283,5 @@ table.t td.r,table.t th.r{text-align:right}
 .recbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between;background:var(--warn-soft,#fff3cd);border-radius:12px;padding:8px 12px;margin-bottom:12px;font-size:13px}
 .navh{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.9px;color:var(--muted,#8b8b95);opacity:.8;padding:16px 14px 6px}
 #side-nav .navh{color:rgba(255,255,255,.45)}
+#cfg-bar{position:fixed;left:50%;transform:translateX(-50%);width:calc(100% - 24px);max-width:560px;bottom:76px;z-index:98;background:var(--ink,#222);color:#fff;border-radius:14px;padding:10px 12px;display:flex;gap:8px;align-items:center;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+@media(min-width:900px){#cfg-bar{bottom:24px}}

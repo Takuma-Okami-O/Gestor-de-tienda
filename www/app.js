@@ -715,8 +715,8 @@ const cfgDirty = () => !!CD && JSON.stringify(CD) !== JSON.stringify(S.config);
 function cfgBar() {
   let b = $('#cfg-bar');
   if (!cfgDirty()) { if (b) b.remove(); if (CD) CD = null; return; }
-  if (!b) { b = document.createElement('div'); b.id = 'cfg-bar'; b.style.cssText = 'position:fixed;left:12px;right:12px;bottom:76px;z-index:98;background:var(--ink,#222);color:#fff;border-radius:14px;padding:10px 12px;display:flex;gap:8px;align-items:center;box-shadow:0 8px 30px rgba(0,0,0,.3)'; document.body.appendChild(b); }
-  b.innerHTML = `<span style="flex:1;font-size:14px">Tienes cambios sin guardar</span><button class="btn sm ghost" data-act="cfgDiscard" style="color:#fff;border-color:#fff5">Descartar</button><button class="btn sm ok" data-act="cfgSave">Guardar cambios</button>`;
+  if (!b) { b = document.createElement('div'); b.id = 'cfg-bar'; document.body.appendChild(b); }
+  b.innerHTML = `<span style="flex:1;font-size:14px">Tienes cambios sin guardar</span><button class="btn sm" data-act="cfgDiscard" style="background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,.55)">Descartar</button><button class="btn sm ok" data-act="cfgSave">Guardar cambios</button>`;
 }
 function vAjustes() {
   const c = cfgD(), owner = isOwner(), themes = Object.entries(THEMES).filter(([k, t]) => !t.brand || k === S.config.tema);
