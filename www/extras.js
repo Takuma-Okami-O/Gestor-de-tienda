@@ -436,7 +436,7 @@ facHTML = function (f) {
   .band .fx{text-align:right}.band .fx small{letter-spacing:3px;font-size:11px;opacity:.85}.band .fx b{display:block;font-size:26px;margin-top:2px}
   .in{padding:22px 34px}.grid{display:flex;gap:16px;margin-bottom:18px}.box{flex:1;border:1px solid #e5e7eb;border-radius:12px;padding:13px 15px}.box h4{margin:0 0 6px;font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:${acc}}.box div{line-height:1.55}.mut{color:#6b7280}
   .stamp{display:inline-block;border:2.5px solid ${stamp[0]};color:${stamp[0]};font-weight:800;letter-spacing:2px;padding:3px 14px;border-radius:8px;transform:rotate(-4deg);font-size:15px;margin-top:6px}
-  table{width:100%;border-collapse:collapse}th{background:${acc};color:${ink};text-align:left;padding:10px 12px;font-size:10.5px;letter-spacing:1px;text-transform:uppercase;-webkit-print-color-adjust:exact;print-color-adjust:exact}th:first-child{border-radius:8px 0 0 8px}th:last-child{border-radius:0 8px 8px 0}
+  table{width:100%;border-collapse:collapse}th{background:${acc};color:${ink};text-align:left;padding:10px 12px;font-size:10.5px;letter-spacing:1px;text-transform:uppercase;-webkit-print-color-adjust:exact;print-color-adjust:exact}th{box-shadow:1px 0 0 ${acc}}th:first-child{border-radius:8px 0 0 8px}th:last-child{border-radius:0 8px 8px 0}
   td{padding:10px 12px;border-bottom:1px solid #eef0f3}tbody tr:nth-child(even) td{background:#f8f9fb;-webkit-print-color-adjust:exact;print-color-adjust:exact}.r{text-align:right}.bs{font-size:10.5px;color:#6b7280}
   .tw{display:flex;gap:18px;margin-top:16px;align-items:flex-start}.tw .l{flex:1}.tot{width:300px;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}.tot div{display:flex;justify-content:space-between;padding:8px 14px}
   .tot .big{background:${acc};color:${ink};font-size:17px;font-weight:800;-webkit-print-color-adjust:exact;print-color-adjust:exact}.tot .sd{background:#fff7ed;color:#9a3412;font-weight:700}
@@ -455,4 +455,32 @@ facHTML = function (f) {
     <div class="tot"><div><span>Subtotal</span><span>${money(f.subtotal)}</span></div>${f.descPct ? `<div><span>Descuento ${f.descPct}%</span><span>−${money(f.desc)}</span></div>` : ''}<div class="big"><span>TOTAL</span><span>${money(f.total)}</span></div>${r ? `<div class="bs"><span>Referencia en ${esc(XT.sym())}</span><span>${NF.format(f.total * r)}</span></div>` : ''}
       ${cred ? `<div><span>Abonado</span><span>${money(pagado(f))}</span></div><div class="sd"><span>Saldo pendiente</span><span>${money(sal)}</span></div>${r && sal > 0 ? `<div class="bs"><span>Saldo en ${esc(XT.sym())}</span><span>${NF.format(sal * r)}</span></div>` : ''}` : ''}</div></div></div>
   <div class="ft"><b>${esc(c.pie || '¡Gracias por su compra!')}</b><div class="nf">Comprobante de venta interno · no es un documento fiscal</div><div class="dev">Gestor de Tienda · Desarrollado por Analista de sistemas Eber Romero</div></div></div></body></html>`;
+};
+
+/* ---------- 12) Factura como imagen (PNG) para compartir por WhatsApp ---------- */
+let h2cP = null;
+const loadH2C = () => window.html2canvas ? Promise.resolve() : (h2cP = h2cP || new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'html2canvas.min.js'; s.onload = ok; s.onerror = () => { h2cP = null; no(new Error('No se pudo cargar el generador de imágenes')); }; document.head.appendChild(s); }));
+async function htmlToPng(html, ancho = 820) {
+  await loadH2C();
+  const fr = document.createElement('iframe'); fr.style.cssText = `position:fixed;left:-99999px;top:0;width:${ancho}px;height:1200px;border:0;visibility:hidden`; document.body.appendChild(fr);
+  try {
+    await new Promise(res => { fr.onload = res; fr.srcdoc = html; });
+    const d = fr.contentDocument; await (d.fonts && d.fonts.ready || Promise.resolve()); await Promise.all([...d.images].map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })));
+    const el = d.querySelector('.pg') || d.body, h = Math.ceil(el.scrollHeight); fr.style.height = h + 'px';
+    const cv = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false, width: ancho, windowWidth: ancho, height: h, windowHeight: h });
+    return await new Promise((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('No se pudo crear la imagen')), 'image/png'));
+  } finally { fr.remove(); }
+}
+async function compartirImagen(blob, nombre, texto) {
+  try { const file = new File([blob], nombre, { type: 'image/png' }); if (!isNative() && navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: nombre, text: texto || '' }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  await saveFile(nombre, blob, 'image/png');
+}
+Object.assign(ACT, {
+  facImg: async d => { const f = factura(d.id); if (!f) return; toast('Generando imagen…'); try { await compartirImagen(await htmlToPng(facHTML(f)), 'Factura-' + f.num + '.png', ''); } catch (e) { toast(e.message || 'No se pudo generar la imagen', 'err'); } },
+  facImgWA: async d => { const f = factura(d.id), c = cliente(f.clienteId); toast('Generando imagen…'); try { const b = await htmlToPng(facHTML(f)); await compartirImagen(b, 'Factura-' + f.num + '.png', ''); if (!isNative()) openWA(c ? c.tel : '', ''); } catch (e) { toast(e.message || 'No se pudo generar la imagen', 'err'); } }
+});
+const _fm3 = facModal; facModal = function (id, nueva) {
+  _fm3(id, nueva); const f = factura(id); if (!f) return; const dlg = [...$$('.dialog')].pop(), w = dlg && $('[data-act=facWA]', dlg);
+  if (w) w.insertAdjacentHTML('beforebegin', `<button class="btn soft" data-act="facImg" data-id="${f.id}">${ic('image')} Imagen (PNG)</button>`);
+  const pr = dlg && $('[data-act=facPrint]', dlg); if (pr && isNative()) pr.remove();
 };
