@@ -144,7 +144,7 @@ const _vInicio = vInicio; vInicio = function () { return XT.bar() + _vInicio(); 
 const _vVender = vVender; vVender = function () { return XT.bar() + _vVender(); };
 const _facText = facText; facText = function (f) { const t = _facText(f); return f.tasa ? t.replace(/(\*TOTAL: [^\n]*\*)/, `$1\n≈ ${XT.bs(f.total, f.tasa)} (tasa ${NF.format(f.tasa)})`) : t; };
 const _facHTML = facHTML; facHTML = function (f) { const h = _facHTML(f); return f.tasa ? h.replace(/(<div class="big"><span>TOTAL<\/span><span>[^<]*<\/span><\/div>)/, `$1<div style="color:#64748b"><span>≈ ${esc(XT.sym())} (tasa ${NF.format(f.tasa)})</span><span>${XT.bs(f.total, f.tasa)}</span></div>`) : h; };
-const _facModal = facModal; facModal = function (id, nueva) { _facModal(id, nueva); const f = factura(id); if (!f || !f.tasa) return; const t = [...$$('.dialog .totals')].pop(); if (t) t.insertAdjacentHTML('afterbegin', `<div class="tr" style="font-size:12px;color:var(--muted)"><span>Tasa ${NF.format(f.tasa)}</span><span>≈ ${XT.bs(f.total, f.tasa)}</span></div>`); };
+const _facModal = facModal; facModal = function (id, nueva) { _facModal(id, nueva); const f = factura(id); if (f && isOwner() && f.estado !== 'ANULADA' && f.tipo === 'CREDITO') { const v = $('[data-act=facVoid]', [...$$('.dialog')].pop()); if (v) v.insertAdjacentHTML('beforebegin', `<button class="btn soft" data-act="facEdit" data-id="${f.id}">Editar montos</button>`); } if (!f || !f.tasa) return; const t = [...$$('.dialog .totals')].pop(); if (t) t.insertAdjacentHTML('afterbegin', `<div class="tr" style="font-size:12px;color:var(--muted)"><span>Tasa ${NF.format(f.tasa)}</span><span>≈ ${XT.bs(f.total, f.tasa)}</span></div>`); };
 
 ROUTES.inicio.v = vInicio; ROUTES.vender.v = vVender; ROUTES.mas.v = vMas;
 
@@ -181,8 +181,10 @@ function ajustesExtra() {
     <label class="row" style="gap:10px;margin-bottom:10px;cursor:pointer"><input type="checkbox" data-input="cfgChk" data-k="recOn" ${c.recOn ? 'checked' : ''} style="width:20px;height:20px;accent-color:var(--accent)"> <span>Avisarme qué deudores cobrar hoy</span></label>
     <div class="row"><div class="f" style="max-width:150px"><label class="l">Cada (días)</label><input class="in" type="number" min="0" inputmode="numeric" data-input="cfg" data-k="recDias" value="${esc(c.recDias)}"></div>
     <div class="f"><label class="l">Fechas específicas</label><input class="in" data-input="cfg" data-k="recFechas" value="${esc(c.recFechas)}" placeholder="2026-11-05, 2026-11-20"></div></div>
-    <div class="f"><label class="l">Mensaje (opcional)</label><textarea class="in" data-input="cfg" data-k="recMsg" placeholder="Hola {nombre}, tu saldo en {tienda} es {saldo}. {facturas}">${esc(c.recMsg)}</textarea></div>
-    <div class="hint small">Variables: {nombre} {saldo} {tienda} {facturas}. Al abrir la app, o desde Créditos, verás la lista con un botón de WhatsApp por cliente (WhatsApp exige que tú toques «enviar»).</div></div>` : '';
+    <div class="f"><label class="l">Avisar antes de cada cuota (días antes)</label><input class="in" type="number" min="0" max="30" inputmode="numeric" data-input="cfg" data-k="recAntes" value="${esc(c.recAntes)}"></div>
+    <div class="row"><div class="f"><label class="l">Saludo (opcional)</label><input class="in" maxlength="140" data-input="cfg" data-k="recSaludo" value="${esc(c.recSaludo)}" placeholder="Hola {nombre} 👋"></div><div class="f"><label class="l">Cierre (opcional)</label><input class="in" maxlength="140" data-input="cfg" data-k="recCierre" value="${esc(c.recCierre)}" placeholder="¡Gracias por tu puntualidad!"></div></div>
+    <div class="small muted b" style="margin:6px 0 4px">VISTA PREVIA</div><div id="rec-prev" style="white-space:pre-wrap;background:#e7f7e1;border-radius:12px;padding:10px 12px;font-size:13px">${esc(recPrev())}</div>
+    <div class="hint small" style="margin-top:8px">Puedes personalizar solo el saludo y el cierre (con {nombre} y {tienda}). Las cuotas, fechas y montos las arma la app y no se pueden borrar ni dañar. Los deudores nunca ven la palabra «vencida».</div></div>` : '';
   return tasa + perm + resp + ver;
 }
 const _vAj = vAjustes; vAjustes = function () { const h = _vAj(), i = h.indexOf(' Sincronización en la nube'); if (i < 0) return h; const j = h.lastIndexOf('<div class="card">', i); return h.slice(0, j) + ajustesExtra() + h.slice(j); };
@@ -240,18 +242,7 @@ const _pe = ACT.prodEdit; ACT.prodEdit = (d, ...a) => {
     ${p.desc ? `<p class="muted small" style="margin-top:8px">${esc(p.desc)}</p>` : ''}<div class="dfoot"><button class="btn" data-act="close">Cerrar</button></div>`);
 };
 
-/* ---------- 7) Recordatorios de cobro ---------- */
-function recDue() {
-  const c = S.config; if (!c.recOn) return [];
-  const hoy = todayStr(), fechas = String(c.recFechas || '').split(/[\s,;]+/).filter(Boolean), dias = Math.max(0, Math.floor(num(c.recDias)));
-  return S.clientes.filter(cl => cl.tel && deudaCliente(cl.id) > 0).map(cl => {
-    const first = activas().filter(f => f.clienteId === cl.id && saldo(f) > 0).map(f => ymd(f.fecha)).sort()[0], last = cl.ultRec || first;
-    const since = Math.floor((new Date(hoy + 'T12:00:00') - new Date(last + 'T12:00:00')) / 864e5);
-    const porFecha = fechas.includes(hoy) && cl.ultRec !== hoy, porInt = dias > 0 && since >= dias && cl.ultRec !== hoy;
-    return porFecha || porInt ? { cl, motivo: porFecha ? 'Fecha programada' : 'Hace ' + since + ' días sin recordatorio' } : null;
-  }).filter(Boolean);
-}
-function marcaRec(cid) { const cl = cliente(cid); if (cl) { cl.ultRec = todayStr(); save(); } }
+/* ---------- 7) Cuotas y recordatorios de cobro ---------- */
 const recBar = () => { const n = recDue().length; return n ? `<div class="recbar"><span>🔔 <b>${n}</b> cobro${n === 1 ? '' : 's'} por recordar hoy</span><button class="btn sm" data-act="recOpen">Ver y enviar</button></div>` : ''; };
 const _vCre = vCreditos; vCreditos = function () { return recBar() + _vCre(); }; ROUTES.creditos.v = vCreditos;
 const _vIni2 = vInicio; vInicio = function () { return recBar() + _vIni2(); }; ROUTES.inicio.v = vInicio;
@@ -306,3 +297,98 @@ vMas = function () {
 };
 ROUTES.mas.v = vMas;
 if (L && L.token) { try { buildNav(); } catch { } }
+
+/* ---------- 9) Editar montos de una factura a crédito (solo dueño) ---------- */
+function feCalc() {
+  const f = factura($('#fe-id').value), its = [...$$('.fe-p')].map(x => r2(num(x.value))), pct = Math.min(100, Math.max(0, num($('#fe-d').value)));
+  const sub = r2(sum(f.items.map((i, k) => its[k] * i.qty))), desc = r2(sub * pct / 100), total = r2(sub - desc), pag = pagado(f), sal = r2(total - pag);
+  $('#fe-res').innerHTML = `Subtotal ${money(sub)}${pct ? ` · Descuento −${money(desc)}` : ''}<br><b>Nuevo total ${money(total)}</b> · Abonado ${money(pag)} · <b style="color:${sal < 0 ? 'var(--bad)' : 'inherit'}">Saldo ${money(Math.max(0, sal))}</b>${sal < 0 ? '<br><span style="color:var(--bad)">El total no puede ser menor a lo ya abonado.</span>' : ''}`;
+  return { its, pct, sub, desc, total, sal };
+}
+INP.feCalc = feCalc;
+ACT.facEdit = d => {
+  const f = factura(d.id); if (!f || !isOwner()) return; $$('.overlay').forEach(o => closeModal(o));
+  modal(`${dh('Editar montos · ' + f.num)}<input type="hidden" id="fe-id" value="${f.id}">
+    <p class="muted small" style="margin-bottom:8px">Cambia el precio de cada artículo. Los abonos ya registrados no se tocan y el saldo se recalcula solo. No cambia las existencias.</p>
+    ${f.items.map(i => `<div class="row" style="align-items:center;gap:8px;margin-bottom:8px"><div style="flex:1" class="small"><b>${esc(i.nombre)}</b><br><span class="muted">${i.qty} × (antes ${money(i.precio)})</span></div><input class="in fe-p" type="number" step="0.01" min="0" inputmode="decimal" data-input="feCalc" style="width:110px" value="${i.precio}"></div>`).join('')}
+    <div class="f"><label class="l">Descuento (%)</label><input class="in" id="fe-d" type="number" min="0" max="100" inputmode="decimal" data-input="feCalc" value="${f.descPct || ''}" placeholder="0"></div>
+    <div class="hint small" id="fe-res" style="margin-bottom:6px"></div>
+    <div class="dfoot"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="facEditSave">${ic('check')} Guardar montos</button></div>`);
+  feCalc();
+};
+ACT.facEditSave = () => {
+  const f = factura($('#fe-id').value), k = feCalc(); if (k.sal < 0) return toast('El total no puede ser menor a lo ya abonado', 'err');
+  if (k.its.some(v => v <= 0)) return toast('Todos los precios deben ser mayores a 0', 'err');
+  f.items.forEach((i, n) => { i.precio = k.its[n]; });
+  f.subtotal = k.sub; f.descPct = k.pct; f.desc = k.desc; f.total = k.total; f.ganancia = r2(k.total - sum(f.items.map(i => (i.costo || 0) * i.qty)));
+  f.estado = k.sal > 0.004 ? 'PENDIENTE' : 'PAGADA'; f.editada = new Date().toISOString();
+  save(); $$('.overlay').forEach(o => closeModal(o)); toast('Montos actualizados', 'ok'); render(); setTimeout(() => facModal(f.id), 250);
+};
+
+/* ---------- 10) Plan de cuotas y recordatorios (mensaje con partes fijas protegidas) ---------- */
+const addDays = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return ymd(d.toISOString()); };
+const diasHasta = iso => Math.round((new Date(iso + 'T12:00:00') - new Date(todayStr() + 'T12:00:00')) / 864e5);
+function plan(f) {
+  if (!f || f.tipo !== 'CREDITO' || f.estado === 'ANULADA') return [];
+  const n = Math.max(1, Math.floor(f.cuotas || 1)), fr = f.freq || 15;
+  if (!f.vence && n === 1) return [];
+  const first = f.vence || addDays(ymd(f.fecha), fr), base = r2(f.total / n); let rest = pagado(f); const hoy = todayStr();
+  return [...Array(n)].map((_, k) => {
+    const monto = k === n - 1 ? r2(f.total - base * (n - 1)) : base, pag = Math.min(monto, Math.max(0, rest)); rest = r2(rest - pag);
+    const fecha = addDays(first, k * fr), pend = r2(monto - pag), ok = pend <= 0.004;
+    return { n: k + 1, de: n, fecha, monto, pend: ok ? 0 : pend, estado: ok ? 'Pagada' : fecha < hoy ? 'Vencida' : 'Pendiente', f };
+  });
+}
+const _ut2 = updateTotals; updateTotals = function () {
+  _ut2(); const t = $('#cart-totals'); if (!t || cart.tipo !== 'CREDITO') return; const n = Math.max(1, Math.min(24, Math.floor(num(cart.cuotas)) || 1));
+  if (n > 1) { const c = cartCalc(); t.insertAdjacentHTML('beforeend', `<div class="tr" style="font-size:13px;color:var(--muted)"><span>${n} cuotas de</span><b>${money(r2(c.total / n))}</b></div>`); }
+};
+const _rc = renderCart; renderCart = function () {
+  _rc(); if (cart.tipo !== 'CREDITO') return; const v = $('[data-input=cartVence]'); if (!v) return;
+  v.closest('.f').querySelector('label').textContent = 'Primera cuota vence el';
+  v.closest('.row').insertAdjacentHTML('afterend', `<div class="row"><div class="f"><label class="l">N.º de cuotas</label><input class="in" type="number" min="1" max="24" inputmode="numeric" data-input="cartCuotas" value="${cart.cuotas || 1}"></div>
+    <div class="f"><label class="l">Una cuota cada</label><select class="in" data-input="cartFreq">${[[7, '7 días (semanal)'], [15, '15 días (quincenal)'], [30, '30 días (mensual)']].map(([d, l]) => `<option value="${d}" ${(cart.freq || 15) === d ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>`);
+  updateTotals();
+};
+function planHTML(p, vend) {
+  return `<div class="small muted b" style="margin:10px 0 4px">PLAN DE CUOTAS</div><table class="t"><tbody>${p.map(c => `<tr><td>Cuota ${c.n}/${c.de}</td><td>${fdate(c.fecha + 'T12:00:00')}</td><td class="r b">${money(c.monto)}</td><td class="r"><span class="badge ${c.estado === 'Pagada' ? 'ok' : c.estado === 'Vencida' && vend ? 'bad' : 'warn'}">${c.estado === 'Vencida' && !vend ? 'Pendiente' : c.estado}</span></td></tr>`).join('')}</tbody></table>`;
+}
+const _fm2 = facModal; facModal = function (id, nueva) {
+  _fm2(id, nueva); const f = factura(id), p = plan(f); if (!p.length) return; const t = [...$$('.dialog .totals')].pop(); if (t) t.insertAdjacentHTML('afterend', planHTML(p, true));
+};
+const _ft2 = facText; facText = function (f) {
+  let t = _ft2(f), p = plan(f); if (p.length > 1) t = t.replace(/\nVence: [^\n]*/, '') + '\n\n*Plan de cuotas*\n' + p.map(c => `Cuota ${c.n}/${c.de} — ${fdate(c.fecha + 'T12:00:00')}: ${money(c.monto)}`).join('\n'); return t;
+};
+
+/* mensaje: saludo y cierre editables (solo {nombre} y {tienda}); el bloque de montos y fechas lo arma la app y no se puede borrar */
+const safeTxt = (t, c) => String(t || '').slice(0, 140).replace(/\{nombre\}/gi, c.nombre).replace(/\{tienda\}/gi, S.config.nombre).replace(/\{[^}]*\}/g, '').replace(/[*_~`]/g, '').trim();
+function msgBloque(c, d) {
+  if (d && d.tipo === 'antes') return d.cuotas.map(x => { const dd = diasHasta(x.fecha); return `Tu cuota *${x.n} de ${x.de}* en *${S.config.nombre}* ${dd <= 0 ? 'vence hoy' : dd === 1 ? 'vence mañana' : 'vence el *' + fdate(x.fecha + 'T12:00:00') + '*'}.\nMonto a cancelar: *${money(x.pend)}*`; }).join('\n\n');
+  const pend = activas().filter(f => f.clienteId === c.id && saldo(f) > 0);
+  return `Tienes un saldo pendiente en *${S.config.nombre}* de *${money(deudaCliente(c.id))}*:\n` + pend.map(f => `• ${f.num} (${fdate(f.fecha)}): ${money(saldo(f))}`).join('\n');
+}
+remindText = function (cid, d) {
+  const c = cliente(cid), cf = S.config;
+  return `${safeTxt(cf.recSaludo, c) || 'Hola ' + c.nombre + ' 👋'}\n\n${msgBloque(c, d)}\n\n${safeTxt(cf.recCierre, c) || (d && d.tipo === 'antes' ? '¡Gracias por tu puntualidad!' : '¿Cuándo podemos coordinar tu pago? ¡Gracias!')}`;
+};
+function recDue() {
+  const c = S.config; if (!c.recOn) return [];
+  const hoy = todayStr(), fechas = String(c.recFechas || '').split(/[\s,;]+/).filter(Boolean), dias = Math.max(0, Math.floor(num(c.recDias))), antes = Math.max(0, Math.floor(num(c.recAntes)));
+  return S.clientes.filter(cl => cl.tel && deudaCliente(cl.id) > 0).map(cl => {
+    const cu = activas().filter(f => f.clienteId === cl.id).flatMap(plan).filter(x => x.pend > 0 && diasHasta(x.fecha) >= 0 && diasHasta(x.fecha) <= antes && !(cl.recs || {})[x.f.id + '|' + x.n]);
+    if (cu.length) return { cl, tipo: 'antes', cuotas: cu, motivo: 'Cuota próxima a vencer' + (cu[0] ? ' (' + (diasHasta(cu[0].fecha) <= 0 ? 'hoy' : 'en ' + diasHasta(cu[0].fecha) + ' d') + ')' : '') };
+    const first = activas().filter(f => f.clienteId === cl.id && saldo(f) > 0).map(f => ymd(f.fecha)).sort()[0], last = cl.ultRec || first, since = Math.floor((new Date(hoy + 'T12:00:00') - new Date(last + 'T12:00:00')) / 864e5);
+    const porFecha = fechas.includes(hoy) && cl.ultRec !== hoy, porInt = dias > 0 && since >= dias && cl.ultRec !== hoy;
+    return porFecha || porInt ? { cl, tipo: 'general', motivo: porFecha ? 'Fecha programada' : 'Hace ' + since + ' días sin recordatorio' } : null;
+  }).filter(Boolean);
+}
+function marcaRec(cid, d) {
+  const cl = cliente(cid); if (!cl) return; cl.ultRec = todayStr();
+  if (d && d.tipo === 'antes') { cl.recs = cl.recs || {}; d.cuotas.forEach(x => { cl.recs[x.f.id + '|' + x.n] = todayStr(); }); }
+  save();
+}
+Object.assign(ACT, { recSend: d => { const x = recDue().find(y => y.cl.id === d.id), c = cliente(d.id); openWA(c.tel, remindText(d.id, x)); marcaRec(d.id, x); closeModal(); setTimeout(recModal, 300); } });
+// el botón «Recordar» de la ficha del cliente sigue enviando el recordatorio general
+remind = function (cid) { const c = cliente(cid); openWA(c.tel, remindText(cid)); marcaRec(cid); };
+function recPrev() { const c = cliente(S.clientes[0] && S.clientes[0].id) || { nombre: 'María', id: '' }, d = { tipo: 'antes', cuotas: [{ n: 2, de: 4, fecha: addDays(todayStr(), 3), pend: 25 }] }; const cf = cfgD(), real = S.config; S.config = cf; try { return (() => { const saved = remindText; return `${safeTxt(cf.recSaludo, c) || 'Hola ' + c.nombre + ' 👋'}\n\n${msgBloque({ id: '', nombre: c.nombre }, d)}\n\n${safeTxt(cf.recCierre, c) || '¡Gracias por tu puntualidad!'}`; })(); } finally { S.config = real; } }
+document.addEventListener('input', e => { const k = e.target.dataset && e.target.dataset.k; if ((k === 'recSaludo' || k === 'recCierre') && $('#rec-prev')) $('#rec-prev').textContent = recPrev(); });

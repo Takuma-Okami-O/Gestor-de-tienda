@@ -73,3 +73,4 @@ Copia `www/config.example.js` a `www/config.js`: `supabase` (url y key), `tema`,
 - Hasta 8 fotos por producto, con cámara o galería (el APK pide permiso de cámara).
 - Venta a crédito: precio editable por artículo y recargo %.
 - Recordatorios de cobro por intervalo de días o fechas, con mensaje propio y envío por WhatsApp.
+- Créditos en cuotas (7/15/30 días), plan de cuotas en la factura, aviso previo al vencimiento y mensaje de cobro con partes fijas protegidas. Editar montos de facturas a crédito (dueño).
