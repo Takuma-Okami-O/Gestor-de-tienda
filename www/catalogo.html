@@ -112,7 +112,7 @@ function buildChips(){
   var b=$('ch').children;for(var i=0;i<b.length;i++)b[i].onclick=function(){cat=this.getAttribute('data-c');for(var j=0;j<b.length;j++)b[j].className='chip'+(b[j]===this?' on':'');draw()};
 }
 function init(){
-  var lg=$('lg');if(D.logoWide){lg.outerHTML='<img class="wide" id="lg" src="'+D.logoWide+'" alt="">';$('hn').style.display='none'}else{lg.innerHTML=D.logo?'<img src="'+D.logo+'">':esc(ini(D.nombre));$('hn').textContent=D.nombre}
+  var lg=$('lg');if(lg.tagName==='IMG'){var nl=document.createElement('div');nl.className='lg';nl.id='lg';lg.parentNode.replaceChild(nl,lg);lg=nl;$('hn').style.display=''}if(D.logoWide){lg.outerHTML='<img class="wide" id="lg" src="'+D.logoWide+'" alt="">';$('hn').style.display='none'}else{lg.innerHTML=D.logo?'<img src="'+D.logo+'">':esc(ini(D.nombre));$('hn').textContent=D.nombre}
   $('hs').textContent=D.slogan||'Catálogo de productos';
   $('ha').textContent=D.direccion||'';$('ft').textContent=D.pie||'';
   $('q').oninput=function(){q=this.value.toLowerCase();draw()};

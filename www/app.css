@@ -280,3 +280,4 @@ table.t td.r,table.t th.r{text-align:right}
 .kpi .kl{padding-right:46px;line-height:1.25;min-height:30px;align-items:flex-start}
 .kpi.hero .kl{padding-right:46px}
 .ratebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between;background:var(--accent-soft);border-radius:12px;padding:8px 12px;margin-bottom:12px;font-size:13px}
+.recbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between;background:var(--warn-soft,#fff3cd);border-radius:12px;padding:8px 12px;margin-bottom:12px;font-size:13px}

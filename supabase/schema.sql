@@ -103,10 +103,12 @@ language plpgsql security definer set search_path = public as $$
 declare
   p public.profiles; it jsonb; c text; rid text; uu bigint; dd boolean; ex public.records; found_ex boolean; stale boolean;
   nd jsonb; ds numeric; opid text; isowner boolean; cur bigint; rej jsonb := '[]'::jsonb; den jsonb := '[]'::jsonb; mine text[] := '{}';
-  recs jsonb := '[]'::jsonb; more boolean := false; lastseq bigint; r record; n int; lim int := 400; mx int; costo numeric; gan numeric; itm jsonb; items jsonb; k text; val jsonb;
+  emp_ok boolean := false; recs jsonb := '[]'::jsonb; more boolean := false; lastseq bigint; r record; n int; lim int := 400; mx int; costo numeric; gan numeric; itm jsonb; items jsonb; k text; val jsonb;
 begin
   p := public._me(); isowner := p.rol = 'owner';
   select seq into cur from public.stores where id = p.store_id for update; -- serializa por tienda
+  select coalesce(data->>'empInv' = 'true', false) into emp_ok from public.records where store_id = p.store_id and col = 'config' and id = 'config' and not del;
+  emp_ok := coalesce(emp_ok, false);
   for it in select * from jsonb_array_elements(coalesce(push, '[]'::jsonb)) loop
     c := it->>'c'; rid := it->>'id';
     if c is null or rid is null or length(rid) > 80 or c not in ('productos','clientes','facturas','movs','gastos','cierres','categorias','config') then continue; end if;
@@ -119,6 +121,11 @@ begin
     nd := case when dd then null else it->'data' end; opid := null; val := null;
     ds := case when jsonb_typeof(it->'ds') = 'number' then (it->>'ds')::numeric else null end;
 
+    -- Empleado sin permiso de inventario: solo puede descontar/sumar existencias por ventas; no crea, edita ni borra productos
+    if c = 'productos' and not isowner and not emp_ok then
+      if dd or not found_ex or ex.del or ds is null then den := den || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue; end if;
+      nd := ex.data;
+    end if;
     if not dd and c = 'productos' then
       if found_ex and not ex.del and ex.data is not null then
         if ds is not null then
@@ -230,6 +237,22 @@ begin
     active = coalesce(team_update.active, public.profiles.active)
   where id = uid and store_id = p.store_id;
   if not found then raise exception 'Usuario no encontrado'; end if;
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- El dueño elimina la cuenta de un empleado (no la suya ni la de otro dueño)
+create or replace function public.team_delete(uid uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare p public.profiles; t public.profiles;
+begin
+  p := public._me();
+  if p.rol <> 'owner' then raise exception 'Solo el dueño puede administrar usuarios'; end if;
+  if uid = p.id then raise exception 'No puedes eliminar tu propia cuenta'; end if;
+  select * into t from public.profiles where id = uid and store_id = p.store_id;
+  if not found then raise exception 'Usuario no encontrado'; end if;
+  if t.rol = 'owner' then raise exception 'Cambia su rol a Empleado antes de eliminar esta cuenta'; end if;
+  delete from public.profiles where id = uid;
+  delete from auth.users where id = uid;
   return jsonb_build_object('ok', true);
 end $$;
 
@@ -403,6 +426,7 @@ revoke all on function public.team_list() from public, anon;
 revoke all on function public.team_add(uuid, text, text) from public, anon;
 revoke all on function public.team_update(uuid, text, text, boolean) from public, anon;
 revoke all on function public.team_set_password(uuid, text) from public, anon;
+revoke all on function public.team_delete(uuid) from public, anon;
 revoke all on function public._backup_store(uuid, text) from public, anon, authenticated;
 revoke all on function public.crear_respaldos_auto() from public, anon, authenticated;
 revoke all on function public.respaldo_crear() from public, anon;
@@ -412,4 +436,4 @@ revoke all on function public._strip(text, jsonb) from public, anon, authenticat
 revoke all on function public._merge_factura(jsonb, jsonb) from public, anon, authenticated;
 grant execute on function public.catalogo_publico(text), public.catalogo_imagenes(text, text) to anon, authenticated;
 grant execute on function public.me(), public.sync(bigint, jsonb), public.team_list(),
-  public.team_add(uuid, text, text), public.team_update(uuid, text, text, boolean), public.team_set_password(uuid, text), public.respaldo_crear(), public.respaldos_lista(), public.respaldo_restaurar(bigint) to authenticated;
+  public.team_add(uuid, text, text), public.team_update(uuid, text, text, boolean), public.team_set_password(uuid, text), public.team_delete(uuid), public.respaldo_crear(), public.respaldos_lista(), public.respaldo_restaurar(bigint) to authenticated;

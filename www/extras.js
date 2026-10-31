@@ -98,10 +98,10 @@ Object.assign(INP, {
     const el = $('#cj-dif'); if (co === '') { el.textContent = ''; return; }
     const df = r2(num(co) - esp); el.innerHTML = Math.abs(df) < .005 ? '<span style="color:var(--ok)">✔ La caja cuadra</span>' : `<span style="color:var(--bad)">Diferencia: ${df > 0 ? '+' : ''}${money(df)} (${df > 0 ? 'sobra' : 'falta'})</span>`;
   },
-  tasaOn: e => { S.config.tasaOn = e.target.checked; save(); render(); if (e.target.checked) XT.refresh(); },
-  tasaFuente: e => { S.config.tasaFuente = e.target.value; save(); render(); },
-  tasaManual: e => { S.config.tasaManual = num(e.target.value); save(); },
-  moneda2: e => { S.config.moneda2 = e.target.value.slice(0, 4); save(); }
+  tasaOn: e => { cfgEdit('tasaOn', e.target.checked); if (e.target.checked) XT.refresh(); },
+  tasaFuente: e => cfgEdit('tasaFuente', e.target.value),
+  tasaManual: e => cfgEdit('tasaManual', num(e.target.value), true),
+  moneda2: e => cfgEdit('moneda2', e.target.value.slice(0, 4), true)
 });
 Object.assign(ACT, {
   tasaRef: () => XT.refresh(true),
@@ -155,7 +155,7 @@ const CSVS = {
   cierres: () => [['Día', 'Ventas', 'Cobrado', 'Gastos', 'Apertura', 'Esperado', 'Contado', 'Diferencia', 'Cerrado por'], ...(S.cierres || []).map(c => [c.dia, c.ventas, c.cobrado, c.gastos, c.apertura, c.esperado, c.contado, c.diferencia, c.por])]
 };
 function ajustesExtra() {
-  const c = S.config, owner = isOwner(), a = XT.age();
+  const c = cfgD(), owner = isOwner(), a = XT.age();
   const tasa = `<div class="card"><h3>💱 Segunda moneda y tasa del día</h3>
     ${owner ? `<label class="row" style="gap:10px;margin-bottom:10px"><input type="checkbox" data-input="tasaOn" ${c.tasaOn ? 'checked' : ''}> <span>Mostrar precios también en bolívares</span></label>
     <div class="row"><div class="f"><label class="l">Fuente de la tasa</label><select class="in" data-input="tasaFuente"><option value="bcv" ${c.tasaFuente === 'bcv' ? 'selected' : ''}>BCV (oficial)</option><option value="usdt" ${c.tasaFuente === 'usdt' ? 'selected' : ''}>USDT / paralelo (referencia)</option><option value="manual" ${c.tasaFuente === 'manual' ? 'selected' : ''}>Manual</option></select></div>
@@ -170,7 +170,16 @@ function ajustesExtra() {
     <div class="row wrap" style="margin-top:8px">${Object.keys(CSVS).map(k => `<button class="btn sm soft" data-act="exportCsv" data-k="${k}">${k[0].toUpperCase() + k.slice(1)} .csv</button>`).join('')}</div>
     ${SB() ? `<div class="row wrap" style="margin-top:12px"><button class="btn soft" style="flex:1" data-act="bkNow">☁ Crear copia en la nube ahora</button><button class="btn ghost" style="flex:1" data-act="bkList">Ver / restaurar copias</button></div>` : ''}</div>` : '';
   const ver = `<div class="card"><h3>🔄 Versión</h3><div class="small muted" id="ver-info">Versión instalada: <b>${esc(UPD.cur || '—')}</b></div><button class="btn soft block" style="margin-top:8px" data-act="updCheck">Buscar actualización</button></div>`;
-  return tasa + resp + ver;
+  const perm = owner ? `<div class="card"><h3>${ic('users')} Permisos del equipo</h3>
+    <label class="row" style="gap:10px;cursor:pointer"><input type="checkbox" data-input="cfgChk" data-k="empInv" ${c.empInv ? 'checked' : ''} style="width:20px;height:20px;accent-color:var(--accent)"> <span>Permitir que los empleados <b>editen el inventario</b> (crear, modificar y borrar productos)</span></label>
+    <div class="hint small" style="margin-top:8px">Apagado: los empleados solo ven productos y existencias, y pueden vender. Se aplica también en el servidor.</div></div>
+  <div class="card"><h3>🔔 Recordatorios de cobro</h3>
+    <label class="row" style="gap:10px;margin-bottom:10px;cursor:pointer"><input type="checkbox" data-input="cfgChk" data-k="recOn" ${c.recOn ? 'checked' : ''} style="width:20px;height:20px;accent-color:var(--accent)"> <span>Avisarme qué deudores cobrar hoy</span></label>
+    <div class="row"><div class="f" style="max-width:150px"><label class="l">Cada (días)</label><input class="in" type="number" min="0" inputmode="numeric" data-input="cfg" data-k="recDias" value="${esc(c.recDias)}"></div>
+    <div class="f"><label class="l">Fechas específicas</label><input class="in" data-input="cfg" data-k="recFechas" value="${esc(c.recFechas)}" placeholder="2026-11-05, 2026-11-20"></div></div>
+    <div class="f"><label class="l">Mensaje (opcional)</label><textarea class="in" data-input="cfg" data-k="recMsg" placeholder="Hola {nombre}, tu saldo en {tienda} es {saldo}. {facturas}">${esc(c.recMsg)}</textarea></div>
+    <div class="hint small">Variables: {nombre} {saldo} {tienda} {facturas}. Al abrir la app, o desde Créditos, verás la lista con un botón de WhatsApp por cliente (WhatsApp exige que tú toques «enviar»).</div></div>` : '';
+  return tasa + perm + resp + ver;
 }
 const _vAj = vAjustes; vAjustes = function () { const h = _vAj(), i = h.indexOf(' Sincronización en la nube'); if (i < 0) return h; const j = h.lastIndexOf('<div class="card">', i); return h.slice(0, j) + ajustesExtra() + h.slice(j); };
 ROUTES.ajustes.v = vAjustes;
@@ -214,3 +223,41 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { UP
 setInterval(() => { if (XT.on() && !document.hidden) XT.refresh(); }, 10 * 60 * 1000);
 if (XT.on()) XT.refresh();
 else { const w = setInterval(() => { if (typeof Y !== 'undefined' && Y.pulled) { clearInterval(w); if (XT.on()) XT.refresh(); } }, 2000); setTimeout(() => clearInterval(w), 60000); }
+
+/* ---------- 6) Permiso de inventario para empleados ---------- */
+const canInv = () => isOwner() || !!S.config.empInv;
+const _vInv = vInventario; vInventario = function () { let h = _vInv(); if (!canInv()) h = h.replace(/<button class="btn" data-act="prodNew">[\s\S]*?<\/button>/, '').replace(/<button class="btn ghost" data-act="catMgr">[\s\S]*?<\/button>/, ''); return h; };
+ROUTES.inventario.v = vInventario;
+for (const k of ['prodNew', 'prodSave', 'prodDel', 'imgAdd', 'imgRm', 'catMgr', 'catAdd', 'catDel']) { const f = ACT[k]; if (f) ACT[k] = (...a) => canInv() ? f(...a) : toast('Solo el dueño puede modificar el inventario', 'err'); }
+const _pe = ACT.prodEdit; ACT.prodEdit = (d, ...a) => {
+  if (canInv()) return _pe(d, ...a); const p = prod(d.id); if (!p) return; const [k, t] = stockBadge(p);
+  modal(`${dh(esc(p.nombre), `<span class="badge ${k}">${t}</span>`)}${(p.imagenes || []).length ? `<div class="row" style="gap:6px;overflow-x:auto;margin-bottom:10px">${p.imagenes.map(s => `<img src="${s}" style="height:120px;border-radius:10px">`).join('')}</div>` : ''}
+    <dl class="kv2"><dt>Categoría</dt><dd>${esc(p.categoria)}</dd>${p.variante ? `<dt>Variante</dt><dd>${esc(p.variante)}</dd>` : ''}<dt>Código</dt><dd>${esc(p.sku)}</dd><dt>Precio</dt><dd>${money(p.precio)}${XT.rate() ? ' · ' + XT.bs(p.precio) : ''}</dd><dt>Existencia</dt><dd><b>${p.stock}</b> unidades</dd></dl>
+    ${p.desc ? `<p class="muted small" style="margin-top:8px">${esc(p.desc)}</p>` : ''}<div class="dfoot"><button class="btn" data-act="close">Cerrar</button></div>`);
+};
+
+/* ---------- 7) Recordatorios de cobro ---------- */
+function recDue() {
+  const c = S.config; if (!c.recOn) return [];
+  const hoy = todayStr(), fechas = String(c.recFechas || '').split(/[\s,;]+/).filter(Boolean), dias = Math.max(0, Math.floor(num(c.recDias)));
+  return S.clientes.filter(cl => cl.tel && deudaCliente(cl.id) > 0).map(cl => {
+    const first = activas().filter(f => f.clienteId === cl.id && saldo(f) > 0).map(f => ymd(f.fecha)).sort()[0], last = cl.ultRec || first;
+    const since = Math.floor((new Date(hoy + 'T12:00:00') - new Date(last + 'T12:00:00')) / 864e5);
+    const porFecha = fechas.includes(hoy) && cl.ultRec !== hoy, porInt = dias > 0 && since >= dias && cl.ultRec !== hoy;
+    return porFecha || porInt ? { cl, motivo: porFecha ? 'Fecha programada' : 'Hace ' + since + ' días sin recordatorio' } : null;
+  }).filter(Boolean);
+}
+function marcaRec(cid) { const cl = cliente(cid); if (cl) { cl.ultRec = todayStr(); save(); } }
+const recBar = () => { const n = recDue().length; return n ? `<div class="recbar"><span>🔔 <b>${n}</b> cobro${n === 1 ? '' : 's'} por recordar hoy</span><button class="btn sm" data-act="recOpen">Ver y enviar</button></div>` : ''; };
+const _vCre = vCreditos; vCreditos = function () { return recBar() + _vCre(); }; ROUTES.creditos.v = vCreditos;
+const _vIni2 = vInicio; vInicio = function () { return recBar() + _vIni2(); }; ROUTES.inicio.v = vInicio;
+function recModal() {
+  const l = recDue();
+  modal(`${dh('Cobros por recordar')}${l.map(x => `<div class="row small" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line,#eee);gap:8px"><span><b>${esc(x.cl.nombre)}</b><br><span class="muted">${money(deudaCliente(x.cl.id))} · ${esc(x.motivo)}</span></span><button class="btn sm ok" data-act="recSend" data-id="${x.cl.id}">${ic('chat')} WhatsApp</button></div>`).join('') || '<div class="empty">Nada pendiente por hoy 🎉</div>'}<div class="dfoot"><button class="btn" data-act="close">Cerrar</button></div>`);
+}
+Object.assign(ACT, { recOpen: recModal, recSend: d => { const c = cliente(d.id); openWA(c.tel, remindText(d.id)); marcaRec(d.id); closeModal(); setTimeout(recModal, 300); } });
+function recAviso() { try { if (!L.token || !recDue().length) return; const k = 'gestor_rec_' + todayStr(); if (localStorage.getItem(k)) return; localStorage.setItem(k, 1); const n = recDue().length; toast('🔔 ' + n + ' cobro(s) por recordar hoy: toca «Ver y enviar»'); if (location.hash === '#inicio' || !location.hash) render(); if ('Notification' in window && Notification.permission === 'granted') new Notification('Gestor de Tienda', { body: n + ' cobro(s) por recordar hoy' }); } catch { } }
+setTimeout(recAviso, 8000); setInterval(recAviso, 30 * 60 * 1000);
+
+// al terminar de escribir un precio/recargo de crédito, se redibuja el carrito (así no se pierde el cursor mientras escribes)
+document.addEventListener('change', e => { const k = e.target.dataset && e.target.dataset.input; if (k === 'cartPrecio' || k === 'cartRec') renderCart(); });

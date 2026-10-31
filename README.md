@@ -65,3 +65,11 @@ Copia `www/config.example.js` a `www/config.js`: `supabase` (url y key), `tema`,
 - **Caja diaria**: menú Caja (gastos + arqueo + cierre, imprimible).
 - **Respaldos**: copia diaria en Supabase (pg_cron; actívalo en Database > Extensions) + Exportar todo (JSON/CSV).
 - **Actualizaciones**: APK y .exe abren el sitio publicado en GitHub Pages; cada push a main actualiza a todos. Reinstala una sola vez.
+
+## Cambios recientes
+- Empleados: solo ven inventario salvo que el dueño active «editar inventario» (Ajustes > Permisos del equipo; también se exige en el servidor). Re-ejecuta `supabase/schema.sql`.
+- Eliminar cuentas de empleados (Ajustes > Equipo > editar > papelera).
+- Ajustes con borrador y botón «Guardar cambios». Logo propio visible en el login y en el catálogo web.
+- Hasta 8 fotos por producto, con cámara o galería (el APK pide permiso de cámara).
+- Venta a crédito: precio editable por artículo y recargo %.
+- Recordatorios de cobro por intervalo de días o fechas, con mensaje propio y envío por WhatsApp.

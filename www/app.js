@@ -61,7 +61,7 @@ const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hid
 /* ---------- estado y persistencia (IndexedDB) ---------- */
 const DEFAULT = () => ({
   v: 1,
-  config: { nombre: 'Mi Negocio', slogan: '', whatsapp: '', direccion: '', idFiscal: '', moneda: '$', tema: (window.BIZ && BIZ.tema) || 'rosasuave', color: '', pie: '¡Gracias por su compra!', logo: '', catalogUrl: '', tasaOn: false, tasaFuente: 'bcv', tasaManual: 0, moneda2: 'Bs' },
+  config: { nombre: 'Mi Negocio', slogan: '', whatsapp: '', direccion: '', idFiscal: '', moneda: '$', tema: (window.BIZ && BIZ.tema) || 'rosasuave', color: '', pie: '¡Gracias por su compra!', logo: '', catalogUrl: '', tasaOn: false, tasaFuente: 'bcv', tasaManual: 0, moneda2: 'Bs', empInv: false, recOn: false, recDias: 15, recFechas: '', recMsg: '' },
   categorias: ['Damas', 'Caballeros', 'Calzado', 'Accesorios'],
   productos: [], clientes: [], facturas: [], movs: [], gastos: [], cierres: []
 });
@@ -137,10 +137,16 @@ async function fileToDataURL(file, max = 640, q = 0.74) {
     return c.toDataURL('image/jpeg', q);
   } finally { URL.revokeObjectURL(url); }
 }
-function pickImage(cb, max) {
-  const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*';
-  i.onchange = async () => { if (i.files[0]) { try { cb(await fileToDataURL(i.files[0], max)); } catch { toast('No se pudo leer la imagen', 'err'); } } };
+function pickImage(cb, max, o = {}) {
+  const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; if (o.cam) i.capture = 'environment'; if (o.multi) i.multiple = true;
+  i.onchange = async () => { for (const f of [...i.files].slice(0, o.multi || 1)) { try { cb(await fileToDataURL(f, max)); } catch { toast('No se pudo leer la imagen', 'err'); } } };
   i.click();
+}
+/* elegir de dónde viene la foto: cámara o galería */
+function pickSource(cb, max, multi) {
+  const m = modal(`${dh('Agregar foto')}<div class="row" style="gap:10px"><button class="btn" style="flex:1;padding:18px 8px" id="ps-cam">${ic('camera')}<br>Tomar foto</button><button class="btn soft" style="flex:1;padding:18px 8px" id="ps-gal">${ic('image')}<br>Galería</button></div>`);
+  $('#ps-cam', m).onclick = () => { closeModal(m); pickImage(cb, max, { cam: true }); };
+  $('#ps-gal', m).onclick = () => { closeModal(m); pickImage(cb, max, { multi }); };
 }
 
 /* ---------- tema ---------- */
@@ -323,7 +329,7 @@ function prodModal(id) {
   const p = id ? prod(id) : null;
   tmpImgs = p ? [...(p.imagenes || [])] : [];
   const m = modal(`${dh(p ? 'Editar producto' : 'Nuevo producto')}
-    <div class="f"><label class="l">Fotos referenciales (hasta 3)</label><div class="imgs" id="pm-imgs"></div></div>
+    <div class="f"><label class="l">Fotos referenciales (hasta 8)</label><div class="imgs" id="pm-imgs"></div></div>
     <div class="f"><label class="l">Nombre del producto *</label><input class="in" id="pm-nombre" value="${esc(p?.nombre || '')}" placeholder="Ej. Camisa lino manga larga"></div>
     <div class="row"><div class="f"><label class="l">Categoría</label><select class="in" id="pm-cat">${S.categorias.map(c => `<option ${p?.categoria === c ? 'selected' : ''}>${esc(c)}</option>`).join('') || '<option>General</option>'}</select></div>
       <div class="f"><label class="l">Código / SKU</label><input class="in" id="pm-sku" value="${esc(p?.sku || '')}" placeholder="Automático"></div></div>
@@ -342,7 +348,7 @@ function prodModal(id) {
 function drawImgs() {
   const box = $('#pm-imgs'); if (!box) return;
   let h = tmpImgs.map((s, i) => `<div class="slot has"><img src="${s}" alt=""><span class="rm" data-act="imgRm" data-i="${i}">${ic('x')}</span></div>`).join('');
-  if (tmpImgs.length < 3) h += `<div class="slot" data-act="imgAdd">${ic('camera')}<br>Agregar foto</div>`;
+  if (tmpImgs.length < 8) h += `<div class="slot" data-act="imgAdd">${ic('camera')}<br>Agregar foto</div>`;
   box.innerHTML = h;
 }
 function pmCalc(e) {
@@ -402,7 +408,7 @@ function renderPosGrid() {
   }).join('') || `<div class="empty" style="grid-column:1/-1">${ic('box')}<b>${S.productos.length ? 'Sin resultados' : 'No hay productos'}</b>${S.productos.length ? '' : 'Agrega productos en Inventario para poder vender.'}</div>`;
 }
 function cartCalc() {
-  const lines = cart.items.map(i => { const p = prod(i.pid); return p ? { ...i, p, tot: r2(p.precio * i.qty) } : null; }).filter(Boolean);
+  const lines = cart.items.map(i => { const p = prod(i.pid); if (!p) return null; const pr = cart.tipo === 'CREDITO' && num(i.precio) > 0 ? r2(num(i.precio)) : p.precio; return { ...i, p, pr, tot: r2(pr * i.qty) }; }).filter(Boolean);
   const subtotal = r2(sum(lines.map(l => l.tot))), pct = Math.min(100, Math.max(0, num(cart.desc))), desc = r2(subtotal * pct / 100), total = r2(subtotal - desc);
   const abono = cart.tipo === 'CREDITO' ? Math.min(total, Math.max(0, r2(num(cart.abono)))) : total;
   return { lines, subtotal, pct, desc, total, abono, saldo: r2(total - abono), n: sum(lines.map(l => l.qty)) };
@@ -411,13 +417,14 @@ function renderCart() {
   const el = $('#pos-cart'); if (!el) return;
   const c = cartCalc();
   el.innerHTML = `<div class="dh" style="margin-bottom:8px"><h2 style="font-size:17px">${ic('receipt')} Cuenta actual</h2>${c.n ? `<button class="btn sm danger" data-act="cartClear">Vaciar</button>` : ''}<button class="iconbtn cart-close" data-act="cartToggle" style="display:none">${ic('x')}</button></div>
-  <div>${c.lines.map(l => `<div class="cl"><div class="th">${thumb(l.p)}</div><div class="nm">${esc(l.p.nombre)}<small>${money(l.p.precio)} c/u${l.p.variante ? ' · ' + esc(l.p.variante) : ''}</small></div>
+  <div>${c.lines.map(l => `<div class="cl"><div class="th">${thumb(l.p)}</div><div class="nm">${esc(l.p.nombre)}<small>${money(l.pr)} c/u${l.pr !== l.p.precio ? ' (base ' + money(l.p.precio) + ')' : ''}${l.p.variante ? ' · ' + esc(l.p.variante) : ''}</small>${cart.tipo === 'CREDITO' ? `<input class="in" type="number" step="0.01" min="0" inputmode="decimal" data-input="cartPrecio" data-id="${l.pid}" value="${l.pr}" title="Precio a crédito" style="width:96px;padding:4px 8px;font-size:13px;margin-top:3px">` : ''}</div>
     <div style="text-align:right"><div class="step"><button data-act="cartQty" data-id="${l.pid}" data-d="-1">−</button><b>${l.qty}</b><button data-act="cartQty" data-id="${l.pid}" data-d="1">+</button></div><div class="b small" style="margin-top:3px">${money(l.tot)}</div></div></div>`).join('')
     || `<div class="empty" style="padding:22px 6px">${ic('cart')}<b>Cuenta vacía</b>Toca los productos para agregarlos.</div>`}</div>
   <div class="f" style="margin-top:12px"><label class="l">Cliente</label><div class="row"><select class="in" id="cart-cli" data-input="cartCli"><option value="">Cliente de mostrador</option>${S.clientes.slice().sort((a, b) => a.nombre.localeCompare(b.nombre)).map(x => `<option value="${x.id}" ${cart.clienteId === x.id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select><button class="btn soft" style="flex:none;padding:11px 13px" data-act="cliNew" data-pos="1">${ic('plus')}</button></div></div>
   <div class="seg" style="margin-bottom:12px"><button class="${cart.tipo === 'CONTADO' ? 'active' : ''}" data-act="cartTipo" data-t="CONTADO">💵 Contado</button><button class="${cart.tipo === 'CREDITO' ? 'active' : ''}" data-act="cartTipo" data-t="CREDITO">🤝 A crédito</button></div>
   <div class="row"><div class="f"><label class="l">Descuento (%)</label><input class="in" type="number" min="0" max="100" inputmode="decimal" data-input="cartDesc" value="${cart.desc || ''}" placeholder="0"></div>
   ${cart.tipo === 'CONTADO' ? `<div class="f"><label class="l">Método de pago</label><select class="in" data-input="cartMetodo">${METODOS.map(m => `<option ${cart.metodo === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div>` : `<div class="f"><label class="l">Vence el</label><input class="in" type="date" data-input="cartVence" value="${cart.vence}"></div>`}</div>
+  ${cart.tipo === 'CREDITO' ? `<div class="f"><label class="l">Recargo por crédito (%) — ajusta el precio de todos los artículos</label><input class="in" type="number" step="0.1" min="0" inputmode="decimal" data-input="cartRec" value="${cart.recargo || ''}" placeholder="0"></div>` : ''}
   ${cart.tipo === 'CREDITO' ? `<div class="row"><div class="f"><label class="l">Abono inicial (opcional)</label><input class="in" type="number" min="0" step="0.01" inputmode="decimal" data-input="cartAbono" value="${cart.abono || ''}" placeholder="0.00"></div><div class="f"><label class="l">Método del abono</label><select class="in" data-input="cartMetodo">${METODOS.map(m => `<option ${cart.metodo === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div></div>` : ''}
   <div class="totals" id="cart-totals"></div>
   <button class="btn block ${cart.tipo === 'CREDITO' ? '' : 'ok'}" id="cart-go" data-act="checkout" style="padding:15px;font-size:16px"></button>`;
@@ -444,7 +451,7 @@ function checkout() {
   if (cart.tipo === 'CREDITO' && !cli) return toast('Selecciona o crea un cliente para vender a crédito', 'err');
   const now = new Date().toISOString(), costoTot = sum(c.lines.map(l => (l.p.costo || 0) * l.qty));
   const f = { id: uid(), num: nextNum(), fecha: now, clienteId: cli ? cli.id : '', clienteNombre: cli ? cli.nombre : 'Cliente de mostrador',
-    items: c.lines.map(l => ({ pid: l.pid, nombre: l.p.nombre, variante: l.p.variante || '', precio: l.p.precio, costo: l.p.costo || 0, qty: l.qty })),
+    items: c.lines.map(l => ({ pid: l.pid, nombre: l.p.nombre, variante: l.p.variante || '', precio: l.pr, costo: l.p.costo || 0, qty: l.qty })),
     subtotal: c.subtotal, descPct: c.pct, desc: c.desc, total: c.total, tipo: cart.tipo, metodo: cart.metodo, vence: cart.tipo === 'CREDITO' ? cart.vence : '', abonos: [], estado: 'PAGADA', ganancia: r2(c.total - costoTot), tasa: (typeof XT !== 'undefined' && XT.rate()) || 0 };
   if (cart.tipo === 'CONTADO') f.abonos.push({ id: uid(), fecha: now, monto: c.total, metodo: cart.metodo, nota: 'Pago al contado' });
   else { if (c.abono > 0) f.abonos.push({ id: uid(), fecha: now, monto: c.abono, metodo: cart.metodo, nota: 'Abono inicial' }); f.estado = c.saldo > 0 ? 'PENDIENTE' : 'PAGADA'; }
@@ -575,11 +582,13 @@ function abonoSave(cid, fid) {
   for (const f of fs) { if (m <= 0.004) break; const a = Math.min(m, saldo(f)); f.abonos.push({ id: uid(), fecha: now, monto: r2(a), metodo: met, nota: nota || 'Abono' }); m = r2(m - a); if (saldo(f) <= 0.004) f.estado = 'PAGADA'; }
   save(); $$('.overlay').forEach(o => closeModal(o)); toast('Pago registrado', 'ok'); render(); setTimeout(() => cliView(cid), 230);
 }
-function remind(cid) {
+function remindText(cid) {
   const c = cliente(cid), pend = activas().filter(f => f.clienteId === cid && saldo(f) > 0);
-  const t = `Hola ${c.nombre} 👋, te escribimos de *${S.config.nombre}*.\nTienes un saldo pendiente de *${money(deudaCliente(cid))}*:\n` + pend.map(f => `• ${f.num} (${fdate(f.fecha)}): ${money(saldo(f))}${f.vence ? ' — vence ' + fdate(f.vence + 'T12:00:00') : ''}`).join('\n') + `\n\n¿Cuándo podemos coordinar tu pago? ¡Gracias!`;
-  openWA(c.tel, t);
+  const lista = pend.map(f => `• ${f.num} (${fdate(f.fecha)}): ${money(saldo(f))}${f.vence ? ' — vence ' + fdate(f.vence + 'T12:00:00') : ''}`).join('\n');
+  if ((S.config.recMsg || '').trim()) return S.config.recMsg.replace(/\{nombre\}/gi, c.nombre).replace(/\{saldo\}/gi, money(deudaCliente(cid))).replace(/\{tienda\}/gi, S.config.nombre).replace(/\{facturas\}/gi, lista);
+  return `Hola ${c.nombre} 👋, te escribimos de *${S.config.nombre}*.\nTienes un saldo pendiente de *${money(deudaCliente(cid))}*:\n` + pend.map(f => `• ${f.num} (${fdate(f.fecha)}): ${money(saldo(f))}${f.vence ? ' — vence ' + fdate(f.vence + 'T12:00:00') : ''}`).join('\n') + `\n\n¿Cuándo podemos coordinar tu pago? ¡Gracias!`;
 }
+function remind(cid) { const c = cliente(cid); openWA(c.tel, remindText(cid)); if (typeof marcaRec === 'function') marcaRec(cid); }
 
 /* =====================================================================
    HISTORIAL
@@ -693,8 +702,24 @@ function qrPoster() {
 function vMas() {
   return `<div class="tiles">${['historial', 'catalogo', 'ajustes'].map(k => `<div class="tile" data-act="go" data-r="${k}">${ic(ROUTES[k].i)}${ROUTES[k].t}</div>`).join('')}<div class="tile" data-act="go" data-r="inicio">${ic('home')}Resumen</div></div>`;
 }
+/* Los cambios de Ajustes se editan en un borrador y solo se aplican (y sincronizan) con «Guardar cambios». */
+let CD = null;
+const cfgD = () => CD || S.config;
+function cfgEdit(k, v, quiet, k2, v2) {
+  if (!isOwner()) return; if (!CD) CD = { ...S.config };
+  CD[k] = v; if (k2) CD[k2] = v2;
+  const real = S.config; S.config = CD; try { applyTheme(); } finally { S.config = real; }
+  cfgBar(); if (!quiet) { const r0 = S.config; S.config = CD; try { render(); } finally { S.config = r0; } }
+}
+const cfgDirty = () => !!CD && JSON.stringify(CD) !== JSON.stringify(S.config);
+function cfgBar() {
+  let b = $('#cfg-bar');
+  if (!cfgDirty()) { if (b) b.remove(); if (CD) CD = null; return; }
+  if (!b) { b = document.createElement('div'); b.id = 'cfg-bar'; b.style.cssText = 'position:fixed;left:12px;right:12px;bottom:76px;z-index:98;background:var(--ink,#222);color:#fff;border-radius:14px;padding:10px 12px;display:flex;gap:8px;align-items:center;box-shadow:0 8px 30px rgba(0,0,0,.3)'; document.body.appendChild(b); }
+  b.innerHTML = `<span style="flex:1;font-size:14px">Tienes cambios sin guardar</span><button class="btn sm ghost" data-act="cfgDiscard" style="color:#fff;border-color:#fff5">Descartar</button><button class="btn sm ok" data-act="cfgSave">Guardar cambios</button>`;
+}
 function vAjustes() {
-  const c = S.config, owner = isOwner(), themes = Object.entries(THEMES).filter(([k, t]) => !t.brand || k === c.tema);
+  const c = cfgD(), owner = isOwner(), themes = Object.entries(THEMES).filter(([k, t]) => !t.brand || k === S.config.tema);
   return `<div class="cols c2e"><div>
   ${owner ? `<div class="card"><h3>${ic('store')} Datos del negocio</h3>
     <div class="f"><label class="l">Nombre comercial</label><input class="in" data-input="cfg" data-k="nombre" value="${esc(c.nombre)}"></div>
@@ -737,7 +762,7 @@ const ACT = {
   close: () => closeModal(),
   prodNew: () => prodModal(), prodEdit: d => prodModal(d.id), prodSave: d => prodSave(d.id),
   prodDel: d => { const p = prod(d.id); confirmDlg(`¿Eliminar <b>${esc(p.nombre)}</b> del inventario? Las facturas anteriores se conservan.`, 'Eliminar', () => { S.productos = S.productos.filter(x => x.id !== d.id); save(); $$('.overlay').forEach(o => closeModal(o)); toast('Producto eliminado', 'ok'); render(); }); },
-  imgAdd: () => pickImage(s => { tmpImgs.push(s); drawImgs(); }), imgRm: d => { tmpImgs.splice(+d.i, 1); drawImgs(); },
+  imgAdd: () => pickSource(s => { if (tmpImgs.length < 8) { tmpImgs.push(s); drawImgs(); } }, undefined, 8 - tmpImgs.length), imgRm: d => { tmpImgs.splice(+d.i, 1); drawImgs(); },
   invCat: d => { invCat = d.c; renderInvList(); },
   catMgr, catAdd: () => { const v = $('#cm-new').value.trim(); if (!v) return; if (S.categorias.includes(v)) return toast('Esa categoría ya existe', 'err'); S.categorias.push(v); $('#cm-new').value = ''; save(); drawCats(); },
   catDel: d => { const c = S.categorias[+d.i]; if (S.productos.some(p => p.categoria === c)) return toast('Hay productos en esta categoría. Muévelos primero.', 'err'); S.categorias.splice(+d.i, 1); save(); drawCats(); },
@@ -773,8 +798,10 @@ const ACT = {
   qrMode: d => { qrMode = d.m; render(); },
   qrSave: () => { if (!qrText()) return toast('Primero configura el QR', 'err'); const c = document.createElement('canvas'); drawQR(c, qrText(), 800); c.toBlob(b => saveFile('qr.png', b, 'image/png'), 'image/png'); },
   qrPoster,
-  logoPick: () => pickImage(s => { S.config.logo = s; save(); applyTheme(); render(); }, 300), logoDel: () => { S.config.logo = ''; save(); applyTheme(); render(); },
-  tema: d => { if (!isOwner()) return; S.config.tema = d.t; save(); applyTheme(); render(); },
+  logoPick: () => pickSource(s => cfgEdit('logo', s), 300), logoDel: () => cfgEdit('logo', ''),
+  tema: d => { if (!isOwner()) return; cfgEdit('tema', d.t); },
+  cfgSave: () => { if (!CD) return; Object.assign(S.config, CD); CD = null; save(); applyTheme(); cfgBar(); toast('Cambios guardados', 'ok'); render(); },
+  cfgDiscard: () => { CD = null; applyTheme(); cfgBar(); render(); },
   pinSave: async () => { const v = $('#pin-in').value.trim(); if (!/^\d{4,6}$/.test(v)) return toast('El PIN debe tener 4 a 6 números', 'err'); L.pin = await sha(v); saveLocal(); toast('PIN guardado', 'ok'); render(); },
   pinDel: () => { L.pin = ''; saveLocal(); toast('PIN eliminado', 'ok'); render(); },
   backup: () => saveFile(`respaldo-${S.config.nombre.replace(/\W+/g, '-')}-${todayStr()}.json`, JSON.stringify(S), 'application/json'),
@@ -788,9 +815,12 @@ const INP = {
   pmCalc, catRename: e => { const i = +e.target.dataset.i, old = S.categorias[i], v = e.target.value.trim(); if (!v || v === old) return; S.productos.forEach(p => { if (p.categoria === old) p.categoria = v; }); S.categorias[i] = v; save(); },
   cartCli: e => { cart.clienteId = e.target.value; }, cartDesc: e => { cart.desc = e.target.value; updateTotals(); }, cartAbono: e => { cart.abono = e.target.value; updateTotals(); },
   cartMetodo: e => { cart.metodo = e.target.value; }, cartVence: e => { cart.vence = e.target.value; },
-  tcolor: e => { if (!isOwner()) return; S.config.tema = 'custom'; S.config.color = e.target.value; save(); applyTheme(); },
+  tcolor: e => { if (!isOwner()) return; cfgEdit('color', e.target.value, true, 'tema', 'custom'); },
+  cfgChk: e => cfgEdit(e.target.dataset.k, e.target.checked, true),
   qrUrl: e => { S.config.catalogUrl = e.target.value; save(); renderQR(); },
-  cfg: e => { S.config[e.target.dataset.k] = e.target.value; save(); if (e.target.dataset.k === 'nombre') { applyTheme(); const l = $('#set-logo'); if (l && !S.config.logo) l.textContent = initials(S.config.nombre); } }
+  cfg: e => cfgEdit(e.target.dataset.k, e.target.value, true),
+  cartPrecio: e => { const it = cart.items.find(i => i.pid === e.target.dataset.id); if (it) { const v = r2(num(e.target.value)); if (v > 0) it.precio = v; else delete it.precio; updateTotals(); } },
+  cartRec: e => { cart.recargo = num(e.target.value); cart.items.forEach(it => { const p = prod(it.pid); if (p) { if (cart.recargo > 0) it.precio = r2(p.precio * (1 + cart.recargo / 100)); else delete it.precio; } }); $$('[data-input=cartPrecio]').forEach(x => { const it = cart.items.find(i => i.pid === x.dataset.id), p = it && prod(it.pid); if (p) x.value = it.precio || p.precio; }); updateTotals(); }
 };
 document.addEventListener('input', e => { const f = e.target.dataset && e.target.dataset.input; if (f && INP[f]) INP[f](e); });
 document.addEventListener('change', e => { const f = e.target.dataset && e.target.dataset.input; if (f && INP[f] && e.target.tagName === 'SELECT') INP[f](e); });

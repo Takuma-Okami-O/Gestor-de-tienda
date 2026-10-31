@@ -105,6 +105,7 @@ async function sbApi(path, body, method) {
     return rpc('team_add', { uid, nombre, rol: body.rol === 'owner' ? 'owner' : 'employee' });
   }
   const um = path.match(/^\/api\/users\/([\w-]+)$/);
+  if (um && method === 'DELETE') return rpc('team_delete', { uid: um[1] });
   if (um) { const r = await rpc('team_update', { uid: um[1], nombre: body.nombre, rol: body.rol, active: body.active }); if (body.password) await rpc('team_set_password', { uid: um[1], nueva: body.password }); return r; }
   throw new Error('Operación no soportada');
 }
@@ -339,8 +340,8 @@ async function doLogout() {
   if (hasPending() && !confirm(`Hay ${pendingCount()} cambio(s) sin enviar a la nube. Si cierras sesión se perderán. ¿Cerrar sesión de todos modos?`)) return;
   try { if (L.token) await api('/api/logout', {}); } catch { }
   clearInterval(loopT); clearTimeout(syncT);
-  const keep = { tema: S.config.tema, color: S.config.color, nombre: S.config.nombre };
-  S = DEFAULT(); S.config.tema = keep.tema; S.config.color = keep.color; Y = { cursor: 0, meta: {}, storeId: '', last: 0, pulled: false, skew: 0 };
+  const keep = { tema: S.config.tema, color: S.config.color, nombre: S.config.nombre, logo: S.config.logo };
+  S = DEFAULT(); S.config.tema = keep.tema; S.config.color = keep.color; S.config.logo = keep.logo || ''; if (keep.nombre) S.config.nombre = keep.nombre; Y = { cursor: 0, meta: {}, storeId: '', last: 0, pulled: false, skew: 0 };
   const email = L.user?.email; L.token = ''; L.refresh = ''; L.exp = 0; L.user = null; L.store = null; L.pin = ''; L.lastEmail = email || L.lastEmail;
   await IDB.set('state', S); await IDB.set('sync', Y); await saveLocal();
   entered = false; location.hash = ''; showLogin();
@@ -363,7 +364,7 @@ function userModal(u) {
     ${`<div class="f"><label class="l">${u ? 'Nueva contraseña (déjala vacía para no cambiarla)' : 'Contraseña (mín. 8)'}</label><div class="row"><input class="in" id="us-pw" type="text" autocomplete="off" placeholder="${u ? '••••••••' : ''}"><button class="btn soft" type="button" style="flex:none" data-act="pwGen">Generar</button></div></div>`}
     ${u ? `<label class="row" style="cursor:pointer"><input type="checkbox" id="us-act" style="width:20px;height:20px;accent-color:var(--accent)" ${u.active ? 'checked' : ''}><span class="b">Cuenta activa</span></label>` : ''}
     <div class="hint small" style="margin-top:12px">Entrégale el correo y la contraseña a la persona. Al cambiar una contraseña se cierran sus sesiones abiertas.</div>
-    <div class="dfoot"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="userSave" data-id="${u ? u.id : ''}">${ic('check')} Guardar</button></div>`);
+    <div class="dfoot">${u && u.id !== L.user.id && u.rol !== 'owner' ? `<button class="btn danger" style="flex:0 0 auto" data-act="userDel" data-id="${u.id}">${ic('trash')}</button>` : ''}<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="userSave" data-id="${u ? u.id : ''}">${ic('check')} Guardar</button></div>`);
 }
 Object.assign(ACT, {
   syncNow: () => syncNow(true),
@@ -372,6 +373,7 @@ Object.assign(ACT, {
     const o = $('#pw-old').value, n = $('#pw-new').value; if (!o || !n) return toast('Completa ambas contraseñas', 'err');
     try { await api('/api/password', { old: o, new: n }); $('#pw-old').value = $('#pw-new').value = ''; toast('Contraseña actualizada', 'ok'); } catch (e) { toast(e.message, 'err'); }
   },
+  userDel: d => { const u = (window._team || []).find(x => x.id === d.id); confirmDlg(`¿Eliminar la cuenta de <b>${esc(u ? u.nombre : '')}</b>? Perderá el acceso para siempre. Sus ventas ya registradas se conservan.`, 'Eliminar cuenta', async () => { try { await api('/api/users/' + d.id, null, 'DELETE'); $$('.overlay').forEach(o => closeModal(o)); toast('Cuenta eliminada', 'ok'); loadTeam(); } catch (e) { toast(e.message, 'err'); } }); },
   userNew: () => userModal(null),
   userEdit: d => userModal((window._team || []).find(u => u.id === d.id)),
   pwGen: () => { $('#us-pw').value = genPw(); },
