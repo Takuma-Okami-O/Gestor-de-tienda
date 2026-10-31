@@ -4,6 +4,9 @@ on:
   push:
     branches: [main, master]
 
+permissions:
+  contents: read
+
 jobs:
   android-apk:
     runs-on: ubuntu-latest
@@ -16,6 +19,10 @@ jobs:
       - run: npm install
       - run: npx cap add android
       - run: npx capacitor-assets generate --android
+      - name: Iconos de Android (rosa)
+        run: |
+          pip install pillow
+          python3 scripts/android-icons.py
       - run: npx cap sync android
       - name: Compilar APK
         run: cd android && chmod +x gradlew && ./gradlew assembleDebug
@@ -37,3 +44,21 @@ jobs:
           name: GestorDeTienda-Windows
           path: |
             dist/*.exe
+
+  pages:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: www
+      - id: deploy
+        uses: actions/deploy-pages@v4
