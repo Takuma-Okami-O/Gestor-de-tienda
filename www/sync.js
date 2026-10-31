@@ -317,6 +317,7 @@ function enterApp() {
   const r = (location.hash || '#inicio').slice(1);
   if (!ROUTES[r] || (r === 'ajustes' && false)) location.hash = 'inicio'; else render();
   setPill(hasPending() ? 'pend' : (Y.last ? 'ok' : 'off')); if (!entered) { entered = true; startLoop(); }
+  if (SB() && L.token && !(L.store && L.store.slug)) rpc('me').then(m => { L.store = m.store; saveLocal(); if ((location.hash || '').slice(1) === 'catalogo') render(); }).catch(() => { });
   syncNow();
 }
 

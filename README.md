@@ -35,6 +35,15 @@ Copia `www/config.example.js` a `www/config.js`: `supabase` (url y key), `tema`,
 ## 3. Compilar APK / escritorio
 `npm install` → `npx cap add android && npx cap sync` (APK) · `npm run electron:build` (escritorio). O usa el workflow de GitHub Actions `.github/workflows/build.yml`. Supabase ya es HTTPS.
 
+## Catálogo en vivo (alojado solo)
+- El catálogo es `www/catalogo.html`: una página que lee los productos desde Supabase cada vez que se abre (y se refresca sola cada 45 s). No hay que subir nada: lo que agregues, cambies o quites en Inventario aparece ahí.
+- Se publica con GitHub Pages desde el workflow (job `pages`). Una sola vez: repo > **Settings > Pages > Source = "GitHub Actions"**.
+- Enlace: `https://USUARIO.github.io/REPO/catalogo.html?t=CODIGO` (el código es único por tienda; la app lo muestra en Catálogo y genera el QR). Para otro dominio: `catalogBase` en `www/config.js`.
+- Seguridad: solo se publican productos con "Mostrar en el catálogo"; nunca costos ni márgenes. Las fotos se cargan solo cuando se ven.
+
+## Iconos de Android
+`scripts/android-icons.py` (lo ejecuta el workflow) genera el icono clásico, redondo y adaptativo desde `assets/icon-foreground.png` y `assets/icon-background.png`, y elimina el icono por defecto de Capacitor.
+
 ## Cómo se evitan los conflictos (Supabase)
 - **Stock:** cada equipo envía la *diferencia* de stock (no el número final) y el servidor la suma; ventas simultáneas, incluso sin conexión, no se pisan. Un reintento de envío no resta dos veces.
 - **Abonos:** los pagos de todos los equipos se unen y el estado (pendiente/pagada) se recalcula. Si un equipo anula la factura, queda anulada.

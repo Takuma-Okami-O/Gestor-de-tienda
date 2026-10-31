@@ -31,6 +31,8 @@ create table if not exists public.records (
   primary key (store_id, col, id)
 );
 create index if not exists records_seq_idx on public.records(store_id, seq);
+alter table public.stores add column if not exists slug text;
+create unique index if not exists stores_slug_idx on public.stores(slug);
 alter table public.stores enable row level security;
 alter table public.profiles enable row level security;
 alter table public.records enable row level security;
@@ -53,9 +55,12 @@ declare p public.profiles; s public.stores; em text;
 begin
   p := public._me();
   select * into s from public.stores where id = p.store_id;
+  if s.slug is null then
+    update public.stores set slug = substr(replace(gen_random_uuid()::text, '-', ''), 1, 10) where id = s.id returning * into s;
+  end if;
   select email into em from auth.users where id = p.id;
   return jsonb_build_object('user', jsonb_build_object('id', p.id, 'email', em, 'nombre', p.nombre, 'rol', p.rol),
-                            'store', jsonb_build_object('id', s.id, 'nombre', s.nombre));
+                            'store', jsonb_build_object('id', s.id, 'nombre', s.nombre, 'slug', s.slug));
 end $$;
 
 -- Columna para evitar aplicar dos veces un mismo cambio de stock si se reintenta un envío
@@ -243,6 +248,34 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
+-- ===== Catálogo público en vivo (lo lee cualquiera con el enlace; nunca incluye costos) =====
+create or replace function public.catalogo_publico(p_slug text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare s public.stores; cfg jsonb; cats jsonb; prods jsonb;
+begin
+  select * into s from public.stores where slug = p_slug and active;
+  if not found then return null; end if;
+  select data into cfg from public.records where store_id = s.id and col = 'config' and id = 'config' and not del;
+  select data into cats from public.records where store_id = s.id and col = 'categorias' and id = 'categorias' and not del;
+  select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'nombre', r.data->>'nombre', 'categoria', r.data->>'categoria', 'variante', r.data->>'variante',
+           'precio', r.data->'precio', 'stock', r.data->'stock', 'minimo', r.data->'minimo', 'desc', r.data->>'desc',
+           'nimg', coalesce(jsonb_array_length(case when jsonb_typeof(r.data->'imagenes') = 'array' then r.data->'imagenes' end), 0)) order by r.data->>'nombre'), '[]'::jsonb)
+    into prods from public.records r
+    where r.store_id = s.id and r.col = 'productos' and not r.del and coalesce(r.data->>'catalogo', 'true') <> 'false';
+  return jsonb_build_object('tienda', coalesce(cfg, '{}'::jsonb) - 'catalogUrl' - 'idFiscal', 'categorias', coalesce(cats, '[]'::jsonb), 'productos', prods);
+end $$;
+
+create or replace function public.catalogo_imagenes(p_slug text, p_pid text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare s public.stores; im jsonb;
+begin
+  select * into s from public.stores where slug = p_slug and active;
+  if not found then return '[]'::jsonb; end if;
+  select r.data->'imagenes' into im from public.records r
+    where r.store_id = s.id and r.col = 'productos' and r.id = p_pid and not r.del and coalesce(r.data->>'catalogo', 'true') <> 'false';
+  return case when jsonb_typeof(im) = 'array' then im else '[]'::jsonb end;
+end $$;
+
 -- Crear una tienda (la ejecutas TÚ desde el SQL Editor). Antes crea el usuario dueño en
 -- Authentication > Users > Add user (marca "Auto Confirm User").
 create or replace function public.crear_tienda(nombre_tienda text, email_dueno text, nombre_dueno text, tema text default 'indigo') returns text
@@ -262,6 +295,8 @@ end $$;
 -- Permisos: solo usuarios con sesión pueden llamar a las funciones de la app
 revoke all on function public._me() from public, anon, authenticated;
 revoke all on function public.crear_tienda(text, text, text, text) from public, anon, authenticated;
+revoke all on function public.catalogo_publico(text) from public;
+revoke all on function public.catalogo_imagenes(text, text) from public;
 revoke all on function public.me() from public, anon;
 revoke all on function public.sync(bigint, jsonb) from public, anon;
 revoke all on function public.team_list() from public, anon;
@@ -270,5 +305,6 @@ revoke all on function public.team_update(uuid, text, text, boolean) from public
 revoke all on function public.team_set_password(uuid, text) from public, anon;
 revoke all on function public._strip(text, jsonb) from public, anon, authenticated;
 revoke all on function public._merge_factura(jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.catalogo_publico(text), public.catalogo_imagenes(text, text) to anon, authenticated;
 grant execute on function public.me(), public.sync(bigint, jsonb), public.team_list(),
   public.team_add(uuid, text, text), public.team_update(uuid, text, text, boolean), public.team_set_password(uuid, text) to authenticated;

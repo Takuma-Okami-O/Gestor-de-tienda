@@ -51,6 +51,7 @@ const ICONS = {
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.7"/><path d="m21 16-5-5-8 9"/>',
   receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   store: '<path d="M4 9l1-5h14l1 5M4 9a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0M5 11v9h14v-9"/>',
   more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
@@ -535,7 +536,7 @@ function cliModal(id, fromPos) {
     <div class="row"><div class="f"><label class="l">Teléfono / WhatsApp</label><input class="in" id="cm-tel" inputmode="tel" value="${esc(c?.tel || '')}" placeholder="584141234567"></div><div class="f"><label class="l">Cédula / RIF</label><input class="in" id="cm-doc" value="${esc(c?.doc || '')}"></div></div>
     <div class="f"><label class="l">Dirección</label><input class="in" id="cm-dir" value="${esc(c?.dir || '')}"></div>
     <div class="hint small">Para enviar facturas y recordatorios por WhatsApp escribe el número con código de país y sin signos (ej. 584141234567).</div>
-    <div class="dfoot">${c && !S.facturas.some(f => f.clienteId === c.id) ? `<button class="btn danger" style="flex:0 0 auto" data-act="cliDel" data-id="${c.id}">${ic('trash')}</button>` : ''}<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="cliSave" data-id="${c ? c.id : ''}" data-pos="${fromPos ? 1 : ''}">${ic('check')} Guardar</button></div>`);
+    <div class="dfoot">${c && isOwner() ? `<button class="btn danger" style="flex:0 0 auto" data-act="cliDel" data-id="${c.id}">${ic('trash')}</button>` : ''}<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="cliSave" data-id="${c ? c.id : ''}" data-pos="${fromPos ? 1 : ''}">${ic('check')} Guardar</button></div>`);
 }
 function cliSave(id, fromPos) {
   const nombre = $('#cm-nom').value.trim(); if (!nombre) return toast('Escribe el nombre', 'err');
@@ -625,8 +626,23 @@ function buildCatalog() {
   const json = JSON.stringify(catalogData()).replace(/</g, '\\u003c').split(String.fromCharCode(8232)).join('').split(String.fromCharCode(8233)).join('');
   return window.CATALOG_TPL.replace('__TITLE__', () => esc(S.config.nombre + ' — Catálogo')).replace(/__INK__/g, inkFor(accent())).replace(/__BG__/g, () => themeOf().bg).replace(/__COLOR__/g, () => accent()).replace('__DATA__', () => json);
 }
+const catBase = () => (window.BIZ && BIZ.catalogBase) || 'https://takuma-okami-o.github.io/Gestor-de-tienda/catalogo.html';
+const catalogLink = () => (typeof SB === 'function' && SB() && L.store && L.store.slug) ? catBase() + '?t=' + L.store.slug : '';
 function vCatalogo() {
-  const n = S.productos.filter(p => p.catalogo !== false).length;
+  const n = S.productos.filter(p => p.catalogo !== false).length, link = catalogLink();
+  if (link) return `<div class="cols c2e"><div>
+    <div class="card"><h3>${ic('catalog')} Tu catálogo en línea</h3>
+      <p class="muted" style="margin-bottom:14px">Se actualiza solo: lo que agregues, cambies o quites de tu inventario aparece en este enlace en menos de un minuto. Compártelo o imprime el QR; no tienes que subir nada.</p>
+      <div class="kpis" style="grid-template-columns:1fr 1fr;margin-bottom:14px"><div class="kpi"><div class="kl">Visibles</div><div class="kv">${n}</div></div><div class="kpi"><div class="kl">Ocultos</div><div class="kv">${S.productos.length - n}</div></div></div>
+      <div class="f"><label class="l">Enlace de tu catálogo</label><input class="in" readonly onclick="this.select()" value="${esc(link)}"></div>
+      <div class="row wrap"><button class="btn" style="flex:1" data-act="catShare">${ic('share')} Compartir enlace</button><button class="btn soft" style="flex:1" data-act="catCopy">${ic('copy')} Copiar</button><button class="btn ghost" style="flex:1" data-act="catOpen">${ic('eye')} Ver catálogo</button></div>
+      ${!S.config.whatsapp ? `<div class="hint warn small" style="margin-top:12px">Agrega el WhatsApp del negocio en <a data-act="go" data-r="ajustes" style="text-decoration:underline;cursor:pointer;font-weight:700">Ajustes</a> para recibir los pedidos.</div>` : ''}
+      <p class="small muted" style="margin-top:12px">Para ocultar un producto del catálogo, desmarca “Mostrar en el catálogo” al editarlo en Inventario.</p></div></div>
+  <div class="card"><h3>${ic('catalog')} Código QR</h3>
+    <div class="seg" style="margin-bottom:14px"><button class="${qrMode === 'catalogo' ? 'active' : ''}" data-act="qrMode" data-m="catalogo">Catálogo</button><button class="${qrMode === 'wa' ? 'active' : ''}" data-act="qrMode" data-m="wa">Pedir por WhatsApp</button></div>
+    ${qrMode === 'catalogo' ? '' : `<div class="hint small" style="margin-bottom:12px">Este QR abre un chat de WhatsApp con tu negocio${S.config.whatsapp ? ` (${esc(S.config.whatsapp)})` : '. <b>Configura tu número en Ajustes.</b>'}</div>`}
+    <div class="qrbox"><canvas id="qr-cv" width="460" height="460"></canvas><div id="qr-msg" class="small muted center"></div></div>
+    <div class="dfoot"><button class="btn" data-act="qrSave">${ic('download')} Descargar QR</button><button class="btn soft" data-act="qrPoster">${ic('print')} Cartel para imprimir</button></div></div></div>`;
   return `<div class="cols c2e"><div>
     <div class="card"><h3>${ic('catalog')} Tu catálogo web</h3>
       <p class="muted" style="margin-bottom:14px">Una página elegante con tus productos, fotos y precios. Tus clientes arman su pedido y te lo envían directo por WhatsApp.</p>
@@ -644,7 +660,7 @@ function vCatalogo() {
 }
 function qrText() {
   if (qrMode === 'wa') return S.config.whatsapp ? `https://wa.me/${digits(S.config.whatsapp)}?text=${encodeURIComponent('Hola, quiero información de sus productos')}` : '';
-  return S.config.catalogUrl.trim();
+  return catalogLink() || S.config.catalogUrl.trim();
 }
 function drawQR(cv, text, size) {
   const q = qrcode(0, 'M'); q.addData(text); q.make();
@@ -735,11 +751,24 @@ const ACT = {
   facView: d => facModal(d.id), facPrint: d => printHTML(facHTML(factura(d.id)), 'factura-' + factura(d.id).num + '.html'),
   facWA: d => { const f = factura(d.id), c = cliente(f.clienteId); openWA(c ? c.tel : '', facText(f)); }, facVoid: d => facVoid(d.id),
   cliNew: d => cliModal(d.id, d.pos), cliSave: d => cliSave(d.id, d.pos), cliView: d => cliView(d.id),
-  cliDel: d => { S.clientes = S.clientes.filter(c => c.id !== d.id); save(); $$('.overlay').forEach(o => closeModal(o)); render(); },
+  cliDel: d => {
+    if (!isOwner()) return;
+    const c = cliente(d.id); if (!c) return;
+    if (deudaCliente(c.id) > 0) return toast('Este cliente tiene saldo pendiente. Cobra o anula sus facturas antes de eliminarlo.', 'err');
+    const n = S.facturas.filter(f => f.clienteId === c.id).length;
+    confirmDlg(`¿Eliminar a "${c.nombre}"?${n ? ` Sus ${n} factura(s) se conservan en el historial con su nombre.` : ''}`, 'Eliminar', () => {
+      S.facturas.forEach(f => { if (f.clienteId === c.id) f.clienteId = ''; });
+      S.clientes = S.clientes.filter(x => x.id !== c.id); save();
+      $$('.overlay').forEach(o => closeModal(o)); toast('Cliente eliminado', 'ok'); render();
+    });
+  },
   cliRemind: d => remind(d.id), abonoNew: d => { $$('.overlay').forEach(o => closeModal(o)); setTimeout(() => abonoModal(d.id, d.fid), 200); }, abonoSave: d => abonoSave(d.id, d.fid),
   goSell: d => { $$('.overlay').forEach(o => closeModal(o)); cart.clienteId = d.id; go('vender'); },
   hTab: d => { hTab = d.t; hQ = ''; render(); }, exportCSV,
   catPreview: () => modal(`${dh('Vista previa')}<iframe id="cat-frame" style="width:100%;height:68vh;border:1px solid var(--line);border-radius:14px"></iframe>`, 'wide') && ($('#cat-frame').srcdoc = buildCatalog()),
+  catCopy: () => { const l = catalogLink(); if (!l) return; (navigator.clipboard ? navigator.clipboard.writeText(l) : Promise.reject()).then(() => toast('Enlace copiado', 'ok')).catch(() => prompt('Copia el enlace:', l)); },
+  catOpen: () => { const l = catalogLink(); if (l) window.open(l, '_blank'); },
+  catShare: async () => { const l = catalogLink(); if (!l) return; const cap = window.Capacitor; try { if (cap && cap.Plugins && cap.Plugins.Share) await cap.Plugins.Share.share({ title: S.config.nombre, text: `Mira el catálogo de ${S.config.nombre}`, url: l, dialogTitle: 'Compartir catálogo' }); else if (navigator.share) await navigator.share({ title: S.config.nombre, text: `Mira el catálogo de ${S.config.nombre}`, url: l }); else ACT.catCopy(); } catch { } },
   catDownload: () => saveFile('catalogo.html', buildCatalog(), 'text/html'),
   qrMode: d => { qrMode = d.m; render(); },
   qrSave: () => { if (!qrText()) return toast('Primero configura el QR', 'err'); const c = document.createElement('canvas'); drawQR(c, qrText(), 800); c.toBlob(b => saveFile('qr.png', b, 'image/png'), 'image/png'); },
