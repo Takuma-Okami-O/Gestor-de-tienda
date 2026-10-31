@@ -10,7 +10,7 @@
 let L = { dev: '', pin: '', token: '', refresh: '', exp: 0, user: null, store: null, server: '', tema: '', nombre: '' };
 // Y = bookkeeping de sincronización: cursor del servidor y metadatos por registro
 let Y = { cursor: 0, meta: {}, storeId: '', last: 0, pulled: false, skew: 0 };
-const COLS = ['productos', 'clientes', 'facturas', 'movs'];
+const COLS = ['productos', 'clientes', 'facturas', 'movs', 'gastos', 'cierres'];
 const SINGLE = ['categorias', 'config'];
 const isOwner = () => !!(L.user && L.user.rol === 'owner');
 const saveLocal = () => IDB.db ? IDB.set('local', L).catch(() => { }) : Promise.resolve();
@@ -79,6 +79,11 @@ async function sbApi(path, body, method) {
     sbSetSession(j);
     try { const m = await rpc('me'); return { token: L.token, user: m.user, store: m.store }; }
     catch (e) { L.token = L.refresh = ''; if (e.code === 'net') throw e; throw Object.assign(new Error(/desactivada/.test(e.message) ? e.message : 'Esta cuenta no tiene una tienda asignada. Contacta a soporte.'), { code: 400 }); }
+  }
+  if (path === '/api/recover') {
+    const to = (window.BIZ && BIZ.recoverUrl) || catBase().replace(/[^/]*$/, '') + 'recuperar.html';
+    await sbFetch(url + '/auth/v1/recover' + (to ? '?redirect_to=' + encodeURIComponent(to) : ''), { method: 'POST', body: JSON.stringify({ email: body.email }) });
+    return { ok: true };
   }
   if (path === '/api/sync') return rpc('sync', { since: body.since || 0, push: body.push || [] });
   if (path === '/api/logout') { try { await sbFetch(url + '/auth/v1/logout', { method: 'POST' }, await sbToken()); } catch { } return { ok: true }; }
@@ -266,10 +271,17 @@ function showLogin(msg, kind) {
     <div class="f ${needSrv ? '' : 'hide'}" id="lg-srv-f"><label class="l">Servidor</label><input class="in" id="lg-srv" value="${esc(L.server || '')}" placeholder="https://mi-servidor.com" inputmode="url" autocapitalize="none"></div>
     <div class="err" id="lg-err" ${kind === 'info' ? 'style="color:var(--muted)"' : ''}>${esc(msg || '')}</div>
     <button class="btn block" id="lg-go" type="submit" style="padding:14px;font-size:16px">Entrar</button>
+    ${SB() ? '<a class="link" id="lg-forgot">¿Olvidaste tu contraseña?</a>' : ''}
     <div class="dev">Desarrollado por Analista de sistemas Eber Romero</div></form>`);
   $('#lg-eye').onclick = () => { const p = $('#lg-pass'); p.type = p.type === 'password' ? 'text' : 'password'; };
   /* ajuste oculto para soporte: 7 toques seguidos sobre el logo muestran el campo Servidor */
   let taps = 0, tt; $('#lg-form').firstElementChild.onclick = () => { taps++; clearTimeout(tt); tt = setTimeout(() => taps = 0, 1500); if (taps >= 7 && !SB()) { $('#lg-srv-f').classList.remove('hide'); $('#lg-srv').focus(); } };
+  const fg = $('#lg-forgot'); if (fg) fg.onclick = async () => {
+    const email = $('#lg-email').value.trim(), err = $('#lg-err'); if (!/^\S+@\S+\.\S+$/.test(email)) { err.style.color = ''; err.textContent = 'Escribe tu correo arriba y vuelve a tocar “¿Olvidaste tu contraseña?”'; return; }
+    err.style.color = 'var(--muted)'; err.textContent = 'Enviando…';
+    try { await api('/api/recover', { email }); err.textContent = 'Si el correo está registrado, te enviamos un enlace para crear una nueva contraseña. Revisa también la carpeta de spam.'; }
+    catch (e) { err.style.color = ''; err.textContent = e.code === 'net' ? 'Sin conexión. Inténtalo con internet.' : (/rate|segundos|seconds/i.test(e.message) ? 'Espera un minuto antes de pedir otro correo.' : e.message); }
+  };
   $('#lg-form').onsubmit = e => { e.preventDefault(); doLogin(); };
   ($('#lg-email').value ? $('#lg-pass') : $('#lg-email')).focus();
 }

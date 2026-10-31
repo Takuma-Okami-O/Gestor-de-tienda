@@ -9,10 +9,18 @@ function createWindow() {
     webPreferences: { contextIsolation: true, sandbox: true }
   });
   Menu.setApplicationMenu(null);
-  win.loadFile(path.join(__dirname, '..', 'www', 'index.html'));
+  // Actualizaciones automáticas: abre la versión publicada en internet (siempre la más nueva).
+  // Si no hay internet o falla, usa la copia incluida en el programa.
+  let remote = '';
+  try { remote = require('./remote.json').url || ''; } catch { }
+  const local = () => win.loadFile(path.join(__dirname, '..', 'www', 'index.html'));
+  if (remote) {
+    win.webContents.on('did-fail-load', (e, code, d, url, main) => { if (main && /^https?:/i.test(url) && code !== -3) local(); });
+    win.loadURL(remote);
+  } else local();
   // enlaces externos (WhatsApp, etc.) se abren en el navegador del sistema
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file:')) { e.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); } });
+  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file:') && !(remote && url.startsWith(remote))) { e.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); } });
 }
 const lock = app.requestSingleInstanceLock();
 if (!lock) app.quit();

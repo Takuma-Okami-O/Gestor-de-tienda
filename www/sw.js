@@ -1,5 +1,5 @@
-const V = 'gestor-v3';
-const FILES = ['./', 'index.html', 'app.css', 'app.js', 'sync.js', 'config.js', 'catalog-template.js', 'qrcode.js', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png'];
+const V = 'gestor-v4';
+const FILES = ['./', 'index.html', 'app.css', 'app.js', 'sync.js', 'extras.js', 'version.json', 'config.js', 'catalog-template.js', 'qrcode.js', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(k => Promise.all(k.filter(x => x !== V).map(x => caches.delete(x)))).then(() => self.clients.claim())); });
 // red primero (siempre la versión más nueva); si no hay internet, usa la copia guardada. La API nunca se cachea.

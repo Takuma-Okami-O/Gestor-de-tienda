@@ -58,3 +58,10 @@ Copia `www/config.example.js` a `www/config.js`: `supabase` (url y key), `tema`,
 - Para entrar sin conexión hace falta haber iniciado sesión antes en ese equipo.
 - La "factura" es un comprobante interno, no fiscal.
 - Supabase gratis: pausa el proyecto tras 1 semana sin uso; haz copias periódicas.
+
+## Novedades: recuperar contraseña, tasa BCV/USDT, caja diaria, respaldos y actualizaciones automáticas
+- **Recuperar contraseña**: en Supabase > Authentication > URL Configuration pon *Site URL* y *Redirect URLs* = `https://TU-USUARIO.github.io/TU-REPO/recuperar.html`.
+- **Tasa**: Ajustes > Segunda moneda (dueño). Fuente BCV, USDT/paralelo (dolarapi.com) o manual.
+- **Caja diaria**: menú Caja (gastos + arqueo + cierre, imprimible).
+- **Respaldos**: copia diaria en Supabase (pg_cron; actívalo en Database > Extensions) + Exportar todo (JSON/CSV).
+- **Actualizaciones**: APK y .exe abren el sitio publicado en GitHub Pages; cada push a main actualiza a todos. Reinstala una sola vez.

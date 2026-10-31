@@ -109,7 +109,7 @@ begin
   select seq into cur from public.stores where id = p.store_id for update; -- serializa por tienda
   for it in select * from jsonb_array_elements(coalesce(push, '[]'::jsonb)) loop
     c := it->>'c'; rid := it->>'id';
-    if c is null or rid is null or length(rid) > 80 or c not in ('productos','clientes','facturas','movs','categorias','config') then continue; end if;
+    if c is null or rid is null or length(rid) > 80 or c not in ('productos','clientes','facturas','movs','gastos','cierres','categorias','config') then continue; end if;
     begin uu := (it->>'u')::bigint; exception when others then continue; end;
     if c in ('categorias','config') and not isowner then den := den || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue; end if;
     dd := coalesce(it->>'d', '0') in ('1', 'true');
@@ -248,6 +248,106 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
+-- ===== Respaldos automáticos (copias diarias dentro de Supabase; sin fotos, para ahorrar espacio) =====
+create table if not exists public.backups (
+  id bigint generated always as identity primary key,
+  store_id uuid not null references public.stores(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  tipo text not null default 'auto',
+  n int not null default 0,
+  store_seq bigint not null default 0,
+  data jsonb not null
+);
+create index if not exists backups_store_idx on public.backups(store_id, created_at desc);
+alter table public.backups enable row level security;
+
+create or replace function public._backup_store(sid uuid, tp text) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare bid bigint; sq bigint; cnt int;
+begin
+  select seq into sq from public.stores where id = sid;
+  insert into public.backups (store_id, tipo, n, store_seq, data)
+  select sid, tp, count(*), sq,
+         coalesce(jsonb_agg(jsonb_build_object('c', col, 'id', id, 'data', case when col = 'productos' then data - 'imagenes' else data end)), '[]'::jsonb)
+  from public.records where store_id = sid and not del
+  returning id into bid;
+  -- se conservan las 30 más recientes por tienda
+  delete from public.backups where store_id = sid and id not in (select id from public.backups where store_id = sid order by created_at desc, id desc limit 30);
+  return bid;
+end $$;
+
+-- La ejecuta el programador diario (pg_cron). Solo copia tiendas con cambios desde la última copia.
+create or replace function public.crear_respaldos_auto() returns int
+language plpgsql security definer set search_path = public as $$
+declare st record; n int := 0; lastseq bigint;
+begin
+  for st in select id, seq from public.stores where active loop
+    select store_seq into lastseq from public.backups where store_id = st.id order by created_at desc, id desc limit 1;
+    if lastseq is null or lastseq <> st.seq then perform public._backup_store(st.id, 'auto'); n := n + 1; end if;
+  end loop;
+  return n;
+end $$;
+
+create or replace function public.respaldo_crear() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare p public.profiles;
+begin
+  p := public._me();
+  if p.rol <> 'owner' then raise exception 'Solo el dueño puede gestionar respaldos'; end if;
+  return jsonb_build_object('id', public._backup_store(p.store_id, 'manual'));
+end $$;
+
+create or replace function public.respaldos_lista() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare p public.profiles;
+begin
+  p := public._me();
+  if p.rol <> 'owner' then raise exception 'Solo el dueño puede gestionar respaldos'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', b.id, 'fecha', b.created_at, 'tipo', b.tipo, 'n', b.n) order by b.created_at desc, b.id desc)
+                   from (select * from public.backups where store_id = p.store_id order by created_at desc, id desc limit 30) b), '[]'::jsonb);
+end $$;
+
+-- Restaura una copia: antes guarda una copia de seguridad del estado actual. Las fotos actuales se conservan.
+create or replace function public.respaldo_restaurar(p_id bigint) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare p public.profiles; b public.backups; e jsonb; cur bigint; nowms bigint; c text; rid text; d jsonb; imgs jsonb; kept text[] := '{}'; ncnt int := 0; r record;
+begin
+  p := public._me();
+  if p.rol <> 'owner' then raise exception 'Solo el dueño puede gestionar respaldos'; end if;
+  select * into b from public.backups where id = p_id and store_id = p.store_id;
+  if not found then raise exception 'Respaldo no encontrado'; end if;
+  perform public._backup_store(p.store_id, 'antes-de-restaurar');
+  select seq into cur from public.stores where id = p.store_id for update;
+  nowms := (extract(epoch from clock_timestamp()) * 1000)::bigint;
+  for e in select * from jsonb_array_elements(b.data) loop
+    c := e->>'c'; rid := e->>'id'; d := e->'data';
+    if c = 'productos' then
+      select x.data->'imagenes' into imgs from public.records x where x.store_id = p.store_id and x.col = 'productos' and x.id = rid and not x.del;
+      d := d || jsonb_build_object('imagenes', coalesce(imgs, '[]'::jsonb));
+    end if;
+    cur := cur + 1;
+    insert into public.records (store_id, col, id, u, del, data, seq) values (p.store_id, c, rid, nowms, false, d, cur)
+    on conflict (store_id, col, id) do update set u = excluded.u, del = false, data = excluded.data, seq = excluded.seq;
+    kept := kept || (c || '|' || rid); ncnt := ncnt + 1;
+  end loop;
+  for r in select col, id from public.records where store_id = p.store_id and not del loop
+    if not ((r.col || '|' || r.id) = any(kept)) then
+      cur := cur + 1;
+      update public.records set del = true, data = null, u = nowms, seq = cur where store_id = p.store_id and col = r.col and id = r.id;
+    end if;
+  end loop;
+  update public.stores set seq = cur where id = p.store_id;
+  return jsonb_build_object('ok', true, 'restaurados', ncnt);
+end $$;
+
+-- Programación diaria (07:00 UTC). Si tu proyecto no permite pg_cron, activa Database > Extensions > pg_cron y vuelve a ejecutar este script.
+do $$ begin
+  begin create extension if not exists pg_cron;
+  exception when others then raise notice 'pg_cron no disponible: actívalo en Database > Extensions'; end;
+  begin perform cron.schedule('respaldo-diario', '0 7 * * *', 'select public.crear_respaldos_auto()');
+  exception when others then raise notice 'No se pudo programar el respaldo diario (pg_cron)'; end;
+end $$;
+
 -- ===== Catálogo público en vivo (lo lee cualquiera con el enlace; nunca incluye costos) =====
 create or replace function public.catalogo_publico(p_slug text) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
@@ -303,8 +403,13 @@ revoke all on function public.team_list() from public, anon;
 revoke all on function public.team_add(uuid, text, text) from public, anon;
 revoke all on function public.team_update(uuid, text, text, boolean) from public, anon;
 revoke all on function public.team_set_password(uuid, text) from public, anon;
+revoke all on function public._backup_store(uuid, text) from public, anon, authenticated;
+revoke all on function public.crear_respaldos_auto() from public, anon, authenticated;
+revoke all on function public.respaldo_crear() from public, anon;
+revoke all on function public.respaldos_lista() from public, anon;
+revoke all on function public.respaldo_restaurar(bigint) from public, anon;
 revoke all on function public._strip(text, jsonb) from public, anon, authenticated;
 revoke all on function public._merge_factura(jsonb, jsonb) from public, anon, authenticated;
 grant execute on function public.catalogo_publico(text), public.catalogo_imagenes(text, text) to anon, authenticated;
 grant execute on function public.me(), public.sync(bigint, jsonb), public.team_list(),
-  public.team_add(uuid, text, text), public.team_update(uuid, text, text, boolean), public.team_set_password(uuid, text) to authenticated;
+  public.team_add(uuid, text, text), public.team_update(uuid, text, text, boolean), public.team_set_password(uuid, text), public.respaldo_crear(), public.respaldos_lista(), public.respaldo_restaurar(bigint) to authenticated;

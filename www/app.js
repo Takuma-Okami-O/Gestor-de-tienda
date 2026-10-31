@@ -61,9 +61,9 @@ const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hid
 /* ---------- estado y persistencia (IndexedDB) ---------- */
 const DEFAULT = () => ({
   v: 1,
-  config: { nombre: 'Mi Negocio', slogan: '', whatsapp: '', direccion: '', idFiscal: '', moneda: '$', tema: (window.BIZ && BIZ.tema) || 'rosasuave', color: '', pie: '¡Gracias por su compra!', logo: '', catalogUrl: '' },
+  config: { nombre: 'Mi Negocio', slogan: '', whatsapp: '', direccion: '', idFiscal: '', moneda: '$', tema: (window.BIZ && BIZ.tema) || 'rosasuave', color: '', pie: '¡Gracias por su compra!', logo: '', catalogUrl: '', tasaOn: false, tasaFuente: 'bcv', tasaManual: 0, moneda2: 'Bs' },
   categorias: ['Damas', 'Caballeros', 'Calzado', 'Accesorios'],
-  productos: [], clientes: [], facturas: [], movs: []
+  productos: [], clientes: [], facturas: [], movs: [], gastos: [], cierres: []
 });
 let S = DEFAULT();
 const IDB = {
@@ -445,7 +445,7 @@ function checkout() {
   const now = new Date().toISOString(), costoTot = sum(c.lines.map(l => (l.p.costo || 0) * l.qty));
   const f = { id: uid(), num: nextNum(), fecha: now, clienteId: cli ? cli.id : '', clienteNombre: cli ? cli.nombre : 'Cliente de mostrador',
     items: c.lines.map(l => ({ pid: l.pid, nombre: l.p.nombre, variante: l.p.variante || '', precio: l.p.precio, costo: l.p.costo || 0, qty: l.qty })),
-    subtotal: c.subtotal, descPct: c.pct, desc: c.desc, total: c.total, tipo: cart.tipo, metodo: cart.metodo, vence: cart.tipo === 'CREDITO' ? cart.vence : '', abonos: [], estado: 'PAGADA', ganancia: r2(c.total - costoTot) };
+    subtotal: c.subtotal, descPct: c.pct, desc: c.desc, total: c.total, tipo: cart.tipo, metodo: cart.metodo, vence: cart.tipo === 'CREDITO' ? cart.vence : '', abonos: [], estado: 'PAGADA', ganancia: r2(c.total - costoTot), tasa: (typeof XT !== 'undefined' && XT.rate()) || 0 };
   if (cart.tipo === 'CONTADO') f.abonos.push({ id: uid(), fecha: now, monto: c.total, metodo: cart.metodo, nota: 'Pago al contado' });
   else { if (c.abono > 0) f.abonos.push({ id: uid(), fecha: now, monto: c.abono, metodo: cart.metodo, nota: 'Abono inicial' }); f.estado = c.saldo > 0 ? 'PENDIENTE' : 'PAGADA'; }
   c.lines.forEach(l => { l.p.stock -= l.qty; logMov(l.p, -l.qty, 'Venta ' + f.num); });

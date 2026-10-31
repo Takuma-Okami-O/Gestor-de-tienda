@@ -1,0 +1,23 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nueva contraseña — Gestor de Tienda</title>
+<style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f6efe9;font-family:system-ui,Segoe UI,Arial,sans-serif;color:#3b2a2e;padding:16px}
+.b{background:#fff;border-radius:20px;padding:28px;max-width:400px;width:100%;box-shadow:0 10px 40px rgba(120,60,70,.15)}h1{margin:0 0 6px;font-size:21px}p{color:#7a6a6e;font-size:14px}
+input{width:100%;padding:13px;border:1.5px solid #e3d5d0;border-radius:12px;font-size:16px;margin:6px 0 12px}button{width:100%;padding:14px;border:0;border-radius:12px;background:#b76e79;color:#fff;font-size:16px;font-weight:700;cursor:pointer}
+#m{min-height:20px;font-size:14px;margin:8px 0}.e{color:#c0392b}.o{color:#1f8a5b}.d{text-align:center;font-size:11px;color:#a99;margin-top:16px}</style></head><body>
+<form class="b" id="f"><h1>Crea tu nueva contraseña</h1><p>Escríbela dos veces. Mínimo 8 caracteres.</p>
+<input id="p1" type="password" placeholder="Nueva contraseña" autocomplete="new-password"><input id="p2" type="password" placeholder="Repite la contraseña" autocomplete="new-password">
+<div id="m"></div><button id="go">Guardar contraseña</button><div class="d">Gestor de Tienda · Desarrollado por Analista de sistemas Eber Romero</div></form>
+<script src="config.js"></script><script>
+const h = new URLSearchParams(location.hash.slice(1)), tok = h.get('access_token'), m = document.getElementById('m');
+const say = (t, c) => { m.textContent = t; m.className = c || ''; };
+if (!tok || h.get('type') !== 'recovery') say(h.get('error_description') ? 'El enlace venció o ya fue usado. Pide uno nuevo desde la pantalla de inicio de sesión.' : 'Abre esta página desde el enlace que llegó a tu correo.', 'e');
+document.getElementById('f').onsubmit = async e => {
+  e.preventDefault(); const a = p1.value, b = p2.value;
+  if (a.length < 8) return say('Mínimo 8 caracteres', 'e'); if (a !== b) return say('Las contraseñas no coinciden', 'e'); if (!tok) return;
+  go.disabled = true; say('Guardando…');
+  try {
+    const c = BIZ.supabase, r = await fetch(c.url.replace(/\/+$/, '') + '/auth/v1/user', { method: 'PUT', headers: { 'Content-Type': 'application/json', apikey: c.key, Authorization: 'Bearer ' + tok }, body: JSON.stringify({ password: a }) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.msg || j.error_description || j.message || 'No se pudo guardar'); }
+    say('✔ Contraseña actualizada. Ya puedes abrir la app e iniciar sesión.', 'o'); history.replaceState(null, '', location.pathname); p1.value = p2.value = '';
+  } catch (x) { say(x.message, 'e'); go.disabled = false; }
+};
+</script></body></html>
