@@ -9,6 +9,10 @@ const XT = {
   async get(url) { const c = new AbortController(), t = setTimeout(() => c.abort(), 9000); try { const r = await fetch(url, { signal: c.signal }); if (!r.ok) throw 0; const j = await r.json(); const v = +(j.promedio || j.venta || j.price || 0); return v > 0 ? v : 0; } catch { return 0; } finally { clearTimeout(t); } },
   async refresh(manual) {
     if (!navigator.onLine) { if (manual) toast('Sin internet: se usa la última tasa guardada', 'err'); return; }
+    this.r.c = Date.now();
+    if (SB() && L.token) { // 1.º: la tasa centralizada del servidor (una sola consulta para todas las tiendas)
+      try { const r = await rpc(manual ? 'tasas_refrescar' : 'tasas_get'); if (r && (r.bcv > 0 || r.usdt > 0) && Date.now() - r.t < 4 * 3600e3) { if (r.bcv > 0) this.r.bcv = +r.bcv; if (r.usdt > 0) this.r.usdt = +r.usdt; this.r.t = r.t; try { localStorage.setItem(this.K, JSON.stringify(this.r)); } catch { } if (manual) toast('Tasas actualizadas', 'ok'); this.paint(); return; } } catch { }
+    }
     const [b, u] = await Promise.all([this.get('https://ve.dolarapi.com/v1/dolares/oficial'), this.get('https://ve.dolarapi.com/v1/dolares/paralelo')]);
     if (b) this.r.bcv = b; if (u) this.r.usdt = u;
     if (b || u) { this.r.t = Date.now(); try { localStorage.setItem(this.K, JSON.stringify(this.r)); } catch { } }
@@ -163,7 +167,7 @@ function ajustesExtra() {
     ${c.tasaFuente === 'manual' ? `<div class="f"><label class="l">Tasa manual (${esc(c.moneda2 || 'Bs')} por ${esc(c.moneda)})</label><input class="in" type="number" step="0.01" inputmode="decimal" data-input="tasaManual" value="${c.tasaManual || ''}"></div>` : ''}` : `<p class="muted small">${c.tasaOn ? 'El dueño activó la segunda moneda.' : 'Segunda moneda desactivada por el dueño.'}</p>`}
     <dl class="kv2" style="margin:6px 0 10px"><dt>BCV</dt><dd>${XT.r.bcv ? NF.format(XT.r.bcv) : '—'}</dd><dt>USDT / paralelo</dt><dd>${XT.r.usdt ? NF.format(XT.r.usdt) : '—'}</dd><dt>Consultado</dt><dd>${a < 0 ? 'nunca' : a < 2 ? 'ahora' : 'hace ' + (a < 60 ? a + ' min' : Math.round(a / 60) + ' h')}</dd></dl>
     <button class="btn soft block" data-act="tasaRef">↻ Actualizar tasas ahora</button>
-    <div class="hint small" style="margin-top:8px">Se actualiza sola cada 10 minutos con internet. Sin conexión se usa la última tasa guardada. Cada factura guarda la tasa del momento de la venta.</div></div>`;
+    <div class="hint small" style="margin-top:8px">Se actualiza sola cada hora con internet (el servidor la consulta cada 30 min para todas las tiendas). Sin conexión se usa la última tasa guardada. Cada factura guarda la tasa del momento de la venta.</div></div>`;
   const resp = owner ? `<div class="card"><h3>${ic('download')} Respaldos</h3>
     <p class="muted small" style="margin-bottom:10px">La nube guarda una copia automática cada día (sin fotos, se conservan las últimas 30). Además puedes exportar todo tu negocio en un archivo.${Date.now() - lastExp() > 7 * 864e5 ? '<br><b style="color:var(--bad)">Hace más de 7 días que no exportas una copia.</b>' : ''}</p>
     <button class="btn block" data-act="exportAll">${ic('download')} Exportar todo (archivo completo)</button>
@@ -219,8 +223,8 @@ const UPD = {
 };
 UPD.fetchV().then(v => { UPD.cur = v; }).catch(() => { });
 setInterval(() => UPD.check(false), 30 * 60 * 1000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { UPD.check(false); if (XT.on() && XT.age() > 10) XT.refresh(); } });
-setInterval(() => { if (XT.on() && !document.hidden) XT.refresh(); }, 10 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { UPD.check(false); if (XT.on() && Date.now() - (XT.r.c || 0) > 60 * 60 * 1000) XT.refresh(); } });
+setInterval(() => { if (XT.on() && !document.hidden) XT.refresh(); }, 60 * 60 * 1000);
 if (XT.on()) XT.refresh();
 else { const w = setInterval(() => { if (typeof Y !== 'undefined' && Y.pulled) { clearInterval(w); if (XT.on()) XT.refresh(); } }, 2000); setTimeout(() => clearInterval(w), 60000); }
 

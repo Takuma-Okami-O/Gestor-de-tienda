@@ -371,6 +371,59 @@ do $$ begin
   exception when others then raise notice 'No se pudo programar el respaldo diario (pg_cron)'; end;
 end $$;
 
+-- ===== Tasas BCV / USDT centralizadas (una sola consulta del servidor para todas las tiendas) =====
+create table if not exists public.tasas (
+  id int primary key default 1 check (id = 1),
+  bcv numeric not null default 0, usdt numeric not null default 0,
+  updated_at timestamptz, tried_at timestamptz
+);
+insert into public.tasas (id) values (1) on conflict do nothing;
+alter table public.tasas enable row level security;
+
+create or replace function public._tasas_pull() returns void
+language plpgsql security definer set search_path = public as $$
+declare j jsonb; b numeric; u numeric;
+begin
+  update public.tasas set tried_at = now() where id = 1;
+  begin
+    execute $q$ select content::jsonb from extensions.http_get('https://ve.dolarapi.com/v1/dolares/oficial') $q$ into j;
+    b := coalesce((j->>'promedio')::numeric, (j->>'venta')::numeric);
+  exception when others then b := null; end;
+  begin
+    execute $q$ select content::jsonb from extensions.http_get('https://ve.dolarapi.com/v1/dolares/paralelo') $q$ into j;
+    u := coalesce((j->>'promedio')::numeric, (j->>'venta')::numeric);
+  exception when others then u := null; end;
+  update public.tasas set bcv = coalesce(nullif(b, 0), bcv), usdt = coalesce(nullif(u, 0), usdt),
+         updated_at = case when coalesce(b, 0) > 0 or coalesce(u, 0) > 0 then now() else updated_at end where id = 1;
+end $$;
+
+create or replace function public.tasas_get() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare t public.tasas;
+begin
+  perform public._me();
+  select * into t from public.tasas where id = 1;
+  return jsonb_build_object('bcv', t.bcv, 'usdt', t.usdt, 't', coalesce((extract(epoch from t.updated_at) * 1000)::bigint, 0));
+end $$;
+
+-- Botón «actualizar»: consulta de nuevo solo si pasaron más de 5 minutos desde el último intento (protege al proveedor)
+create or replace function public.tasas_refrescar() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare t public.tasas;
+begin
+  perform public._me();
+  select * into t from public.tasas where id = 1 for update;
+  if t.tried_at is null or t.tried_at < now() - interval '5 minutes' then perform public._tasas_pull(); end if;
+  return public.tasas_get();
+end $$;
+
+do $$ begin
+  begin create extension if not exists http with schema extensions;
+  exception when others then raise notice 'Extensión http no disponible: actívala en Database > Extensions (busca "http")'; end;
+  begin create extension if not exists pg_cron; perform cron.schedule('tasas-bcv-usdt', '*/30 * * * *', 'select public._tasas_pull()');
+  exception when others then raise notice 'No se pudo programar la consulta de tasas (pg_cron)'; end;
+end $$;
+
 -- ===== Catálogo público en vivo (lo lee cualquiera con el enlace; nunca incluye costos) =====
 create or replace function public.catalogo_publico(p_slug text) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
@@ -426,6 +479,9 @@ revoke all on function public.team_list() from public, anon;
 revoke all on function public.team_add(uuid, text, text) from public, anon;
 revoke all on function public.team_update(uuid, text, text, boolean) from public, anon;
 revoke all on function public.team_set_password(uuid, text) from public, anon;
+revoke all on function public._tasas_pull() from public, anon, authenticated;
+revoke all on function public.tasas_get() from public, anon;
+revoke all on function public.tasas_refrescar() from public, anon;
 revoke all on function public.team_delete(uuid) from public, anon;
 revoke all on function public._backup_store(uuid, text) from public, anon, authenticated;
 revoke all on function public.crear_respaldos_auto() from public, anon, authenticated;
@@ -436,4 +492,4 @@ revoke all on function public._strip(text, jsonb) from public, anon, authenticat
 revoke all on function public._merge_factura(jsonb, jsonb) from public, anon, authenticated;
 grant execute on function public.catalogo_publico(text), public.catalogo_imagenes(text, text) to anon, authenticated;
 grant execute on function public.me(), public.sync(bigint, jsonb), public.team_list(),
-  public.team_add(uuid, text, text), public.team_update(uuid, text, text, boolean), public.team_set_password(uuid, text), public.team_delete(uuid), public.respaldo_crear(), public.respaldos_lista(), public.respaldo_restaurar(bigint) to authenticated;
+  public.team_add(uuid, text, text), public.team_update(uuid, text, text, boolean), public.team_set_password(uuid, text), public.team_delete(uuid), public.tasas_get(), public.tasas_refrescar(), public.respaldo_crear(), public.respaldos_lista(), public.respaldo_restaurar(bigint) to authenticated;
