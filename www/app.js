@@ -417,7 +417,7 @@ function cartCalc() {
 function renderCart() {
   const el = $('#pos-cart'); if (!el) return;
   const c = cartCalc();
-  el.innerHTML = `<div class="dh" style="margin-bottom:8px"><h2 style="font-size:17px">${ic('receipt')} Cuenta actual</h2>${c.n ? `<button class="btn sm danger" data-act="cartClear">Vaciar</button>` : ''}<button class="iconbtn cart-close" data-act="cartToggle" style="display:none">${ic('x')}</button></div>
+  el.innerHTML = `<div class="dh" style="margin-bottom:8px"><h2 style="font-size:17px">${ic('receipt')} Cuenta actual</h2>${c.n ? `<button class="btn sm danger" data-act="cartClear">Vaciar</button>` : ''}<button class="iconbtn cart-close" data-act="cartToggle" aria-label="Cerrar">${ic('x')}</button></div>
   <div>${c.lines.map(l => `<div class="cl"><div class="th">${thumb(l.p)}</div><div class="nm">${esc(l.p.nombre)}<small>${money(l.pr)} c/u${l.pr !== l.p.precio ? ' (base ' + money(l.p.precio) + ')' : ''}${l.p.variante ? ' · ' + esc(l.p.variante) : ''}</small>${cart.tipo === 'CREDITO' ? `<input class="in" type="number" step="0.01" min="0" inputmode="decimal" data-input="cartPrecio" data-id="${l.pid}" value="${l.pr}" title="Precio a crédito" style="width:96px;padding:4px 8px;font-size:13px;margin-top:3px">` : ''}</div>
     <div style="text-align:right"><div class="step"><button data-act="cartQty" data-id="${l.pid}" data-d="-1">−</button><b>${l.qty}</b><button data-act="cartQty" data-id="${l.pid}" data-d="1">+</button></div><div class="b small" style="margin-top:3px">${money(l.tot)}</div></div></div>`).join('')
     || `<div class="empty" style="padding:22px 6px">${ic('cart')}<b>Cuenta vacía</b>Toca los productos para agregarlos.</div>`}</div>
@@ -724,7 +724,7 @@ function cfgEdit(k, v, quiet, k2, v2) {
   if (!isOwner()) return; if (!CD) CD = { ...S.config };
   CD[k] = v; if (k2) CD[k2] = v2;
   const real = S.config; S.config = CD; try { applyTheme(); } finally { S.config = real; }
-  cfgBar(); if (!quiet) { const r0 = S.config; S.config = CD; try { render(); } finally { S.config = r0; } }
+  cfgBar(); if (!quiet) { const r0 = S.config; S.config = CD || r0; try { render(); } finally { S.config = r0; } }
 }
 const cfgDirty = () => !!CD && JSON.stringify(CD) !== JSON.stringify(S.config);
 function cfgBar() {
@@ -786,7 +786,7 @@ const ACT = {
   cartQty: d => { const it = cart.items.find(i => i.pid === d.id), p = prod(d.id); it.qty += +d.d; if (it.qty > p.stock) { it.qty = p.stock; toast('Solo hay ' + p.stock + ' en existencia', 'err'); } if (it.qty <= 0) cart.items = cart.items.filter(i => i !== it); renderPosGrid(); renderCart(); },
   cartClear: () => { resetCart(); renderPosGrid(); renderCart(); },
   cartTipo: d => { cart.tipo = d.t; renderCart(); },
-  cartToggle: () => { $('#pos-cart').classList.toggle('open'); $$('.cart-close').forEach(b => b.style.display = $('#pos-cart').classList.contains('open') ? '' : 'none'); },
+  cartToggle: () => { $('#pos-cart').classList.toggle('open'); },
   checkout,
   facView: d => facModal(d.id), facPrint: d => printHTML(facHTML(factura(d.id)), 'factura-' + factura(d.id).num + '.html'),
   facWA: d => { const f = factura(d.id), c = cliente(f.clienteId); openWA(c ? c.tel : '', facText(f)); }, facVoid: d => facVoid(d.id),
