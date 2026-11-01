@@ -63,7 +63,7 @@ const DEFAULT = () => ({
   v: 1,
   config: { nombre: 'Mi Negocio', slogan: '', whatsapp: '', direccion: '', idFiscal: '', moneda: '$', tema: (window.BIZ && BIZ.tema) || 'rosasuave', color: '', pie: '¡Gracias por su compra!', logo: '', catalogUrl: '', tasaOn: false, tasaFuente: 'bcv', tasaManual: 0, moneda2: 'Bs', empInv: false, recOn: false, recDias: 15, recFechas: '', recMsg: '', recAntes: 3, recSaludo: '', recCierre: '', msgBs: 'no' },
   categorias: ['Damas', 'Caballeros', 'Calzado', 'Accesorios'],
-  productos: [], clientes: [], facturas: [], movs: [], gastos: [], cierres: []
+  productos: [], clientes: [], facturas: [], movs: [], gastos: [], cierres: [], proveedores: []
 });
 let S = DEFAULT();
 const IDB = {
@@ -333,6 +333,7 @@ function prodModal(id) {
     <div class="f"><label class="l">Nombre del producto *</label><input class="in" id="pm-nombre" value="${esc(p?.nombre || '')}" placeholder="Ej. Camisa lino manga larga"></div>
     <div class="row"><div class="f"><label class="l">Categoría</label><select class="in" id="pm-cat">${S.categorias.map(c => `<option ${p?.categoria === c ? 'selected' : ''}>${esc(c)}</option>`).join('') || '<option>General</option>'}</select></div>
       <div class="f"><label class="l">Código / SKU</label><input class="in" id="pm-sku" value="${esc(p?.sku || '')}" placeholder="Automático"></div></div>
+    <div class="f ${isOwner() ? '' : 'hide'}"><label class="l">Proveedor (a quién se lo pides)</label><select class="in" id="pm-prov"><option value="">— Sin proveedor —</option>${(S.proveedores || []).map(v => `<option value="${esc(v.id)}" ${p?.provId === v.id ? 'selected' : ''}>${esc(v.nombre)}</option>`).join('')}</select></div>
     <div class="f"><label class="l">Talla / color / variante</label><input class="in" id="pm-var" value="${esc(p?.variante || '')}" placeholder="Ej. M · Azul marino"></div>
     <div class="row"><div class="f ${isOwner() ? '' : 'hide'}"><label class="l">Costo (${esc(S.config.moneda)})</label><input class="in" type="number" step="0.01" min="0" inputmode="decimal" id="pm-costo" data-input="pmCalc" value="${p ? p.costo : ''}" placeholder="0.00"></div>
       <div class="f ${isOwner() ? '' : 'hide'}"><label class="l">% ganancia</label><input class="in" type="number" step="1" id="pm-margen" data-input="pmCalc" value="${p ? p.margen : 40}"></div>
@@ -361,7 +362,7 @@ function prodSave(id) {
   const costo = num($('#pm-costo').value), precio = num($('#pm-precio').value);
   if (precio <= 0) return toast('Indica el precio de venta', 'err');
   const stock = Math.max(0, Math.floor(num($('#pm-stock').value)));
-  const data = { nombre, categoria: $('#pm-cat').value, sku: $('#pm-sku').value.trim(), variante: $('#pm-var').value.trim(), costo, margen: num($('#pm-margen').value), precio, stock, minimo: Math.max(0, Math.floor(num($('#pm-min').value))), desc: $('#pm-desc').value.trim(), imagenes: [...tmpImgs], catalogo: $('#pm-cat-on').checked };
+  const data = { nombre, categoria: $('#pm-cat').value, sku: $('#pm-sku').value.trim(), variante: $('#pm-var').value.trim(), costo, margen: num($('#pm-margen').value), precio, stock, minimo: Math.max(0, Math.floor(num($('#pm-min').value))), desc: $('#pm-desc').value.trim(), imagenes: [...tmpImgs], catalogo: $('#pm-cat-on').checked, provId: $('#pm-prov') ? $('#pm-prov').value : (p?.provId || '') };
   if (id) {
     const p = prod(id), antes = p.stock; Object.assign(p, data);
     if (stock !== antes) logMov(p, stock - antes, stock > antes ? 'Ingreso de mercancía' : 'Ajuste de inventario');
@@ -627,9 +628,23 @@ function exportCSV() {
    CATÁLOGO DIGITAL + QR
    ===================================================================== */
 let qrMode = 'catalogo';
+/* Vista del catálogo a pantalla completa, con botón «Volver» (solo existe mientras el dueño la usa) */
+function catView(url, doc) {
+  catViewClose(true);
+  const d = document.createElement('div'); d.id = 'catv';
+  d.innerHTML = `<div class="cvbar"><button class="cvback" data-act="catBack">&#8592; Volver</button><span>Vista previa del catálogo</span></div><iframe class="cvf" id="cvf" title="Catálogo"></iframe>`;
+  document.body.appendChild(d);
+  const f = d.querySelector('#cvf'); if (url) f.src = url; else f.srcdoc = doc;
+  try { history.pushState({ cv: 1 }, ''); window.addEventListener('popstate', catViewClose, { once: true }); } catch (e) {}
+}
+function catViewClose(silent) {
+  const d = document.getElementById('catv'); if (!d) return; d.remove();
+  window.removeEventListener('popstate', catViewClose);
+  if (silent !== true && history.state && history.state.cv) { try { history.back(); } catch (e) {} }
+}
 function catalogData() {
   return { nombre: S.config.nombre, slogan: S.config.slogan, whatsapp: digits(S.config.whatsapp), direccion: S.config.direccion, moneda: S.config.moneda, color: accent(), ink: inkFor(accent()), logo: S.config.logo || themeOf().mark || '', logoWide: S.config.logo ? '' : (themeOf().full || themeOf().wide || ''), hue: Math.round(accentHue()), bg: themeOf().bg, serif: !!themeOf().serif, pie: S.config.pie,
-    categorias: S.categorias, productos: S.productos.filter(p => p.catalogo !== false).map(p => ({ id: p.id, nombre: p.nombre, categoria: p.categoria, variante: p.variante, precio: p.precio, stock: p.stock, minimo: p.minimo, desc: p.desc, imagenes: p.imagenes || [] })) };
+    categorias: S.categorias, productos: S.productos.filter(p => p.catalogo !== false).map(p => ({ id: p.id, nombre: p.nombre, categoria: p.categoria, variante: p.variante, sku: p.sku, precio: p.precio, stock: p.stock, minimo: p.minimo, desc: p.desc, imagenes: p.imagenes || [] })) };
 }
 function buildCatalog() {
   const json = JSON.stringify(catalogData()).replace(/</g, '\\u003c').split(String.fromCharCode(8232)).join('').split(String.fromCharCode(8233)).join('');
@@ -790,9 +805,10 @@ const ACT = {
   cliRemind: d => remind(d.id), abonoNew: d => { $$('.overlay').forEach(o => closeModal(o)); setTimeout(() => abonoModal(d.id, d.fid), 200); }, abonoSave: d => abonoSave(d.id, d.fid),
   goSell: d => { $$('.overlay').forEach(o => closeModal(o)); cart.clienteId = d.id; go('vender'); },
   hTab: d => { hTab = d.t; hQ = ''; render(); }, exportCSV,
-  catPreview: () => modal(`${dh('Vista previa')}<iframe id="cat-frame" style="width:100%;height:68vh;border:1px solid var(--line);border-radius:14px"></iframe>`, 'wide') && ($('#cat-frame').srcdoc = buildCatalog()),
+  catPreview: () => catView(null, buildCatalog()),
   catCopy: () => { const l = catalogLink(); if (!l) return; (navigator.clipboard ? navigator.clipboard.writeText(l) : Promise.reject()).then(() => toast('Enlace copiado', 'ok')).catch(() => prompt('Copia el enlace:', l)); },
-  catOpen: () => { const l = catalogLink(); if (l) window.open(l, '_blank'); },
+  catOpen: () => { const l = catalogLink(); if (l) catView(l, null); },
+  catBack: () => catViewClose(),
   catShare: async () => { const l = catalogLink(); if (!l) return; const cap = window.Capacitor; try { if (cap && cap.Plugins && cap.Plugins.Share) await cap.Plugins.Share.share({ title: S.config.nombre, text: `Mira el catálogo de ${S.config.nombre}`, url: l, dialogTitle: 'Compartir catálogo' }); else if (navigator.share) await navigator.share({ title: S.config.nombre, text: `Mira el catálogo de ${S.config.nombre}`, url: l }); else ACT.catCopy(); } catch { } },
   catDownload: () => saveFile('catalogo.html', buildCatalog(), 'text/html'),
   qrMode: d => { qrMode = d.m; render(); },

@@ -74,3 +74,10 @@ Copia `www/config.example.js` a `www/config.js`: `supabase` (url y key), `tema`,
 - Venta a crédito: precio editable por artículo y recargo %.
 - Recordatorios de cobro por intervalo de días o fechas, con mensaje propio y envío por WhatsApp.
 - Créditos en cuotas (7/15/30 días), plan de cuotas en la factura, aviso previo al vencimiento y mensaje de cobro con partes fijas protegidas. Editar montos de facturas a crédito (dueño).
+
+## Novedades (catálogo y proveedores)
+- Catálogo rediseñado: categorías circulares con imagen, cuadrícula de productos con botón de carrito.
+- El pedido por WhatsApp incluye el código (Cód.) de cada producto.
+- «Vista previa» y «Ver catálogo» abren a pantalla completa con botón **Volver**.
+- Proveedores (solo dueño): asigna un proveedor a cada producto y ve qué reponer y a quién pedirlo, con mensaje de WhatsApp listo.
+- Después de actualizar, ejecuta de nuevo `supabase/schema.sql` en el SQL Editor (incluye código en el catálogo público y la colección de proveedores).

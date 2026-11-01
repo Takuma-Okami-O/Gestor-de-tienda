@@ -487,3 +487,66 @@ const _fm3 = facModal; facModal = function (id, nueva) {
 };
 
 ACT.facCopy = async d => { const f = factura(d.id); if (!f) return; toast('Generando imagen…'); try { const b = await htmlToPng(facHTML(f)); await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]); toast('Imagen copiada: pégala (Ctrl+V) en WhatsApp Web o donde quieras', 'ok'); } catch (e) { toast('No se pudo copiar; usa «Imagen (PNG)» para guardarla', 'err'); } };
+
+/* =====================================================================
+   PROVEEDORES: a quién le compras cada artículo y qué toca reponer
+   ===================================================================== */
+const pvById = id => (S.proveedores || []).find(v => v.id === id);
+const pvLow = p => (+p.stock || 0) <= (+p.minimo || 0);
+const pvQty = p => Math.max(1, Math.ceil((+p.minimo || 0) * 2 - (+p.stock || 0)));
+function pvGroups() { // productos por reponer, agrupados por proveedor
+  const g = {};
+  S.productos.filter(pvLow).forEach(p => { const k = pvById(p.provId) ? p.provId : ''; (g[k] = g[k] || []).push(p); });
+  return Object.keys(g).sort((a, b) => (a === '') - (b === '') || (pvById(a)?.nombre || '').localeCompare(pvById(b)?.nombre || '')).map(k => ({ v: pvById(k) || null, list: g[k].sort((a, b) => a.stock - b.stock) }));
+}
+function pvMsg(v, list) {
+  const L = [`Hola${v ? ' ' + v.nombre : ''}, soy de ${S.config.nombre}. Necesito reponer estos productos:`, ''];
+  list.forEach(p => L.push(`• ${pvQty(p)} x ${p.nombre}${p.variante ? ' (' + p.variante + ')' : ''}${p.sku ? ' — Cód: ' + p.sku : ''}`));
+  L.push('', '¿Me confirmas disponibilidad y precio? Gracias.');
+  return L.join('\n');
+}
+function vProv() {
+  const gs = pvGroups(), low = gs.reduce((n, g) => n + g.list.length, 0), ago = S.productos.filter(p => (+p.stock || 0) <= 0).length;
+  const reponer = gs.map(g => `<div class="card" style="margin-bottom:12px"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${ic('store')} ${g.v ? esc(g.v.nombre) : 'Sin proveedor asignado'}</h3><span class="badge warn">${g.list.length} por reponer</span></div>
+    ${g.list.map(p => `<div class="row small" style="justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line,#eee);gap:10px"><span><b>${esc(p.nombre)}</b>${p.variante ? ' · ' + esc(p.variante) : ''}<br><span class="muted">Cód: ${esc(p.sku || '—')} · quedan ${p.stock} (mín. ${p.minimo || 0})</span></span><span class="badge ${p.stock <= 0 ? 'bad' : 'warn'}">pedir ${pvQty(p)}</span></div>`).join('')}
+    ${g.v ? `<div class="row wrap" style="margin-top:10px"><button class="btn" style="flex:1" data-act="pvWA" data-id="${g.v.id}" ${digits(g.v.tel) ? '' : 'disabled'}>Pedir por WhatsApp</button><button class="btn soft" style="flex:1" data-act="pvCopy" data-id="${g.v.id}">${ic('copy')} Copiar pedido</button></div>${digits(g.v.tel) ? '' : '<div class="hint small" style="margin-top:6px">Agrega su teléfono para enviarle el pedido por WhatsApp.</div>'}`
+      : `<div class="hint small" style="margin-top:8px">Asigna un proveedor a estos productos desde Inventario > editar producto.</div>`}</div>`).join('') || `<div class="card"><div class="empty">${ic('box')}<b>Todo en orden</b>Ningún producto está por debajo de su existencia mínima.</div></div>`;
+  const lista = (S.proveedores || []).slice().sort((a, b) => a.nombre.localeCompare(b.nombre)).map(v => {
+    const ps = S.productos.filter(p => p.provId === v.id), lw = ps.filter(pvLow).length;
+    return `<div class="card" style="margin-bottom:10px;cursor:pointer" data-act="pvEdit" data-id="${v.id}"><div class="row" style="justify-content:space-between;align-items:center"><div><b>${esc(v.nombre)}</b><div class="small muted">${v.contacto ? esc(v.contacto) + ' · ' : ''}${esc(v.tel || 'Sin teléfono')}</div></div><div style="text-align:right"><div class="small">${ps.length} producto${ps.length === 1 ? '' : 's'}</div>${lw ? `<span class="badge warn">${lw} por reponer</span>` : '<span class="badge ok">al día</span>'}</div></div>${v.notas ? `<div class="small muted" style="margin-top:6px">${esc(v.notas)}</div>` : ''}</div>`;
+  }).join('') || `<div class="card"><div class="empty">${ic('store')}<b>Aún no tienes proveedores</b>Registra de dónde compras tu mercancía.</div></div>`;
+  return `<div class="kpis" style="grid-template-columns:repeat(3,1fr)"><div class="kpi"><div class="kl">Proveedores</div><div class="kv">${(S.proveedores || []).length}</div></div><div class="kpi"><div class="kl">Por reponer</div><div class="kv">${low}</div></div><div class="kpi"><div class="kl">Agotados</div><div class="kv">${ago}</div></div></div>
+  <div class="row" style="justify-content:space-between;align-items:center;margin:16px 2px 8px"><h3 style="margin:0">Qué pedir y a quién</h3></div>${reponer}
+  <div class="row" style="justify-content:space-between;align-items:center;margin:20px 2px 8px"><h3 style="margin:0">Mis proveedores</h3><button class="btn sm" data-act="pvNew">${ic('plus')} Nuevo proveedor</button></div>${lista}`;
+}
+ROUTES.proveedores = { t: 'Proveedores', i: 'store', v: vProv };
+OWNER_ONLY.push('proveedores');
+GRUPOS[0][1].splice(GRUPOS[0][1].indexOf('inventario') + 1, 0, 'proveedores');
+const _vMas0 = vMas; vMas = function () { return _vMas0().replace(/(<div class="tiles">)(<div class="tile" data-act="go" data-r="historial")/, (m, a, b) => isOwner() ? a + `<div class="tile" data-act="go" data-r="proveedores">${ic('store')}Proveedores</div>` + b : m); };
+ROUTES.mas.v = vMas;
+try { buildNav(); } catch { }
+function pvModal(id) {
+  const v = id ? pvById(id) : null, ps = v ? S.productos.filter(p => p.provId === v.id) : [];
+  modal(`${dh(v ? 'Editar proveedor' : 'Nuevo proveedor')}
+    <div class="f"><label class="l">Nombre del proveedor *</label><input class="in" id="pv-nombre" value="${esc(v?.nombre || '')}" placeholder="Ej. Importadora Rivas"></div>
+    <div class="row"><div class="f"><label class="l">WhatsApp / teléfono</label><input class="in" id="pv-tel" inputmode="tel" value="${esc(v?.tel || '')}" placeholder="58414XXXXXXX"></div>
+      <div class="f"><label class="l">Persona de contacto</label><input class="in" id="pv-con" value="${esc(v?.contacto || '')}"></div></div>
+    <div class="f"><label class="l">Notas (qué vende, condiciones, dirección)</label><textarea class="in" id="pv-notas">${esc(v?.notas || '')}</textarea></div>
+    ${v ? `<div class="f"><label class="l">Productos de este proveedor (${ps.length})</label><div class="small muted">${ps.map(p => esc(p.nombre) + (pvLow(p) ? ' ⚠' : '')).join(' · ') || 'Aún no has asignado productos. Hazlo al editar cada producto en Inventario.'}</div></div>` : ''}
+    <div class="dfoot">${v ? `<button class="btn danger ghost" data-act="pvDel" data-id="${v.id}">Eliminar</button>` : ''}<button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="pvSave" data-id="${v?.id || ''}">Guardar</button></div>`);
+}
+Object.assign(ACT, {
+  pvNew: () => pvModal(), pvEdit: d => pvModal(d.id),
+  pvSave: d => {
+    const nombre = $('#pv-nombre').value.trim(); if (!nombre) return toast('Escribe el nombre del proveedor', 'err');
+    const o = { nombre, tel: $('#pv-tel').value.trim(), contacto: $('#pv-con').value.trim(), notas: $('#pv-notas').value.trim() };
+    if (d.id) Object.assign(pvById(d.id), o); else (S.proveedores = S.proveedores || []).push({ id: uid(), fecha: new Date().toISOString(), ...o });
+    save(); $$('.overlay').forEach(x => closeModal(x)); toast('Proveedor guardado', 'ok'); render();
+  },
+  pvDel: d => confirmDlg('Se eliminará el proveedor. Sus productos quedarán «sin proveedor».', 'Eliminar', () => {
+    S.productos.forEach(p => { if (p.provId === d.id) p.provId = ''; }); S.proveedores = S.proveedores.filter(v => v.id !== d.id);
+    save(); $$('.overlay').forEach(x => closeModal(x)); toast('Proveedor eliminado', 'ok'); render();
+  }),
+  pvWA: d => { const g = pvGroups().find(g => g.v && g.v.id === d.id); if (g) openWA(g.v.tel, pvMsg(g.v, g.list)); },
+  pvCopy: d => { const g = pvGroups().find(g => g.v && g.v.id === d.id); if (!g) return; const t = pvMsg(g.v, g.list); (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Pedido copiado', 'ok')).catch(() => prompt('Copia el pedido:', t)); }
+});

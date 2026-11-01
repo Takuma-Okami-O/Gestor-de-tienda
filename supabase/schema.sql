@@ -111,9 +111,9 @@ begin
   emp_ok := coalesce(emp_ok, false);
   for it in select * from jsonb_array_elements(coalesce(push, '[]'::jsonb)) loop
     c := it->>'c'; rid := it->>'id';
-    if c is null or rid is null or length(rid) > 80 or c not in ('productos','clientes','facturas','movs','gastos','cierres','categorias','config') then continue; end if;
+    if c is null or rid is null or length(rid) > 80 or c not in ('productos','clientes','facturas','movs','gastos','cierres','categorias','config','proveedores') then continue; end if;
     begin uu := (it->>'u')::bigint; exception when others then continue; end;
-    if c in ('categorias','config') and not isowner then den := den || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue; end if;
+    if c in ('categorias','config','proveedores') and not isowner then den := den || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue; end if;
     dd := coalesce(it->>'d', '0') in ('1', 'true');
     if not dd and length((it->'data')::text) > 6000000 then continue; end if;
     select * into ex from public.records where store_id = p.store_id and col = c and id = rid;
@@ -179,7 +179,7 @@ begin
   update public.stores set seq = cur where id = p.store_id;
 
   n := 0;
-  for r in select col, id, u, del, data, seq from public.records where store_id = p.store_id and seq > since order by seq limit lim + 1 loop
+  for r in select col, id, u, del, data, seq from public.records where store_id = p.store_id and seq > since and (isowner or col <> 'proveedores') order by seq limit lim + 1 loop
     n := n + 1;
     if n > lim then more := true; exit; end if;
     lastseq := r.seq;
@@ -433,7 +433,7 @@ begin
   if not found then return null; end if;
   select data into cfg from public.records where store_id = s.id and col = 'config' and id = 'config' and not del;
   select data into cats from public.records where store_id = s.id and col = 'categorias' and id = 'categorias' and not del;
-  select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'nombre', r.data->>'nombre', 'categoria', r.data->>'categoria', 'variante', r.data->>'variante',
+  select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'nombre', r.data->>'nombre', 'categoria', r.data->>'categoria', 'variante', r.data->>'variante', 'sku', r.data->>'sku',
            'precio', r.data->'precio', 'stock', r.data->'stock', 'minimo', r.data->'minimo', 'desc', r.data->>'desc',
            'nimg', coalesce(jsonb_array_length(case when jsonb_typeof(r.data->'imagenes') = 'array' then r.data->'imagenes' end), 0)) order by r.data->>'nombre'), '[]'::jsonb)
     into prods from public.records r

@@ -10,7 +10,7 @@
 let L = { dev: '', pin: '', token: '', refresh: '', exp: 0, user: null, store: null, server: '', tema: '', nombre: '' };
 // Y = bookkeeping de sincronización: cursor del servidor y metadatos por registro
 let Y = { cursor: 0, meta: {}, storeId: '', last: 0, pulled: false, skew: 0 };
-const COLS = ['productos', 'clientes', 'facturas', 'movs', 'gastos', 'cierres'];
+const COLS = ['productos', 'clientes', 'facturas', 'movs', 'gastos', 'cierres', 'proveedores'];
 const SINGLE = ['categorias', 'config'];
 const isOwner = () => !!(L.user && L.user.rol === 'owner');
 const saveLocal = () => IDB.db ? IDB.set('local', L).catch(() => { }) : Promise.resolve();
