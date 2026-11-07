@@ -10,7 +10,7 @@
 let L = { dev: '', pin: '', token: '', refresh: '', exp: 0, user: null, store: null, server: '', tema: '', nombre: '' };
 // Y = bookkeeping de sincronización: cursor del servidor y metadatos por registro
 let Y = { cursor: 0, meta: {}, storeId: '', last: 0, pulled: false, skew: 0 };
-const COLS = ['productos', 'clientes', 'facturas', 'movs', 'gastos', 'cierres', 'proveedores'];
+const COLS = ['productos', 'clientes', 'facturas', 'movs', 'gastos', 'cierres', 'proveedores', 'pedidos'];
 const SINGLE = ['categorias', 'config'];
 const isOwner = () => !!(L.user && L.user.rol === 'owner');
 const saveLocal = () => IDB.db ? IDB.set('local', L).catch(() => { }) : Promise.resolve();
@@ -102,7 +102,7 @@ async function sbApi(path, body, method) {
     // se crea la cuenta con una petición aparte (no cambia la sesión del dueño) y luego se enlaza a su tienda
     const j = await sbFetch(url + '/auth/v1/signup', { method: 'POST', body: JSON.stringify({ email, password: body.password }) });
     const uid = (j.user && j.user.id) || j.id; if (!uid) throw new Error('No se pudo crear la cuenta');
-    return rpc('team_add', { uid, nombre, rol: body.rol === 'owner' ? 'owner' : 'employee' });
+    return rpc('team_add', { uid, nombre, rol: ['owner', 'vendedor'].includes(body.rol) ? body.rol : 'employee' });
   }
   const um = path.match(/^\/api\/users\/([\w-]+)$/);
   if (um && method === 'DELETE') return rpc('team_delete', { uid: um[1] });
@@ -352,7 +352,7 @@ async function loadTeam() {
   const box = $('#team-list'); if (!box) return;
   try {
     const { users } = await api('/api/users'); window._team = users;
-    box.innerHTML = users.map(u => `<div class="urow"><div class="li" style="padding:0;gap:11px;flex:1;cursor:default"><div class="av" style="background:${grad(u.nombre)}">${esc(initials(u.nombre))}</div><div class="mid"><div class="t">${esc(u.nombre)} ${u.id === L.user.id ? '<span class="badge gray">Tú</span>' : ''}</div><div class="s">${esc(u.email)}</div></div></div><span class="badge ${u.rol === 'owner' ? 'info' : 'gray'}">${u.rol === 'owner' ? 'Dueño' : 'Empleado'}</span>${u.active ? '' : '<span class="badge bad">Inactivo</span>'}${u.id === L.user.id ? '' : `<button class="iconbtn" data-act="userEdit" data-id="${u.id}">${ic('edit')}</button>`}</div>`).join('');
+    box.innerHTML = users.map(u => `<div class="urow"><div class="li" style="padding:0;gap:11px;flex:1;cursor:default"><div class="av" style="background:${grad(u.nombre)}">${esc(initials(u.nombre))}</div><div class="mid"><div class="t">${esc(u.nombre)} ${u.id === L.user.id ? '<span class="badge gray">Tú</span>' : ''}</div><div class="s">${esc(u.email)}</div></div></div><span class="badge ${u.rol === 'owner' ? 'info' : 'gray'}">${u.rol === 'owner' ? 'Dueño' : u.rol === 'vendedor' ? 'Vendedor' : 'Empleado'}</span>${u.active ? '' : '<span class="badge bad">Inactivo</span>'}${u.id === L.user.id ? '' : `<button class="iconbtn" data-act="userEdit" data-id="${u.id}">${ic('edit')}</button>`}</div>`).join('');
   } catch (e) { box.textContent = e.code === 'net' ? 'Conéctate a internet para administrar el equipo.' : e.message; }
 }
 const genPw = () => { const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s = ''; const r = crypto.getRandomValues(new Uint32Array(10)); for (const x of r) s += a[x % a.length]; return s; };
