@@ -24,9 +24,12 @@ jobs:
           node -e "const f='capacitor.config.json',c=require('./'+f);c.server={url:'$URL',errorPath:'offline.html',cleartext:false};require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
       - run: npx cap add android
       - run: npx capacitor-assets generate --android
-      - name: Permiso de cámara
+      - name: Permisos (cámara y notificaciones)
         run: |
           M=android/app/src/main/AndroidManifest.xml
+          for P in POST_NOTIFICATIONS SCHEDULE_EXACT_ALARM VIBRATE RECEIVE_BOOT_COMPLETED; do
+            grep -q "android.permission.$P" $M || sed -i "s#<application#<uses-permission android:name=\"android.permission.$P\" />\n    <application#" $M
+          done
           grep -q "android.permission.CAMERA" $M || sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <application#' $M
       - name: Iconos de Android (rosa)
         run: |
