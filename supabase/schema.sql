@@ -15,7 +15,7 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   store_id uuid not null references public.stores(id) on delete cascade,
   nombre text not null,
-  rol text not null default 'employee' check (rol in ('owner','employee')),
+  rol text not null default 'employee' check (rol in ('owner','employee','vendedor')),
   active boolean not null default true,
   created_at timestamptz not null default now()
 );
@@ -98,21 +98,28 @@ end $$;
 --  · Stock: se envía como DIFERENCIA (ds) y se suma al stock del servidor → dos equipos vendiendo a la vez no se pisan.
 --  · Facturas: los abonos de todos los equipos se unen; un equipo que anula, anula.
 --  · Empleados: no reciben costos ni márgenes, y no pueden alterarlos.
+-- Rol «vendedor» (revendedores): solo ven el stock y envían pedidos
+do $$ begin
+  alter table public.profiles drop constraint if exists profiles_rol_check;
+  alter table public.profiles add constraint profiles_rol_check check (rol in ('owner','employee','vendedor'));
+end $$;
+
 create or replace function public.sync(since bigint, push jsonb) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
   p public.profiles; it jsonb; c text; rid text; uu bigint; dd boolean; ex public.records; found_ex boolean; stale boolean;
-  nd jsonb; ds numeric; opid text; isowner boolean; cur bigint; rej jsonb := '[]'::jsonb; den jsonb := '[]'::jsonb; mine text[] := '{}';
+  nd jsonb; ds numeric; opid text; isowner boolean; isv boolean; cur bigint; rej jsonb := '[]'::jsonb; den jsonb := '[]'::jsonb; mine text[] := '{}';
   emp_ok boolean := false; recs jsonb := '[]'::jsonb; more boolean := false; lastseq bigint; r record; n int; lim int := 400; mx int; costo numeric; gan numeric; itm jsonb; items jsonb; k text; val jsonb;
 begin
-  p := public._me(); isowner := p.rol = 'owner';
+  p := public._me(); isowner := p.rol = 'owner'; isv := p.rol = 'vendedor';
   select seq into cur from public.stores where id = p.store_id for update; -- serializa por tienda
   select coalesce(data->>'empInv' = 'true', false) into emp_ok from public.records where store_id = p.store_id and col = 'config' and id = 'config' and not del;
   emp_ok := coalesce(emp_ok, false);
   for it in select * from jsonb_array_elements(coalesce(push, '[]'::jsonb)) loop
     c := it->>'c'; rid := it->>'id';
-    if c is null or rid is null or length(rid) > 80 or c not in ('productos','clientes','facturas','movs','gastos','cierres','categorias','config','proveedores') then continue; end if;
+    if c is null or rid is null or length(rid) > 80 or c not in ('productos','clientes','facturas','movs','gastos','cierres','categorias','config','proveedores','pedidos') then continue; end if;
     begin uu := (it->>'u')::bigint; exception when others then continue; end;
+    if isv and c <> 'pedidos' then den := den || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue; end if;
     if c in ('categorias','config','proveedores') and not isowner then den := den || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue; end if;
     dd := coalesce(it->>'d', '0') in ('1', 'true');
     if not dd and length((it->'data')::text) > 6000000 then continue; end if;
@@ -121,6 +128,11 @@ begin
     nd := case when dd then null else it->'data' end; opid := null; val := null;
     ds := case when jsonb_typeof(it->'ds') = 'number' then (it->>'ds')::numeric else null end;
 
+    -- Pedidos: el vendedor solo crea los suyos (nombre y estado los fija el servidor); el dueño los gestiona; el empleado no los toca
+    if c = 'pedidos' and not isowner then
+      if not isv or dd or found_ex or length(coalesce(it->'data', '{}'::jsonb)::text) > 300000 or jsonb_typeof(it->'data'->'items') is distinct from 'array' then den := den || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue; end if;
+      nd := (it->'data') || jsonb_build_object('userId', p.id::text, 'nombre', p.nombre, 'estado', 'PENDIENTE', 'facturaId', '');
+    end if;
     -- Empleado sin permiso de inventario: solo puede descontar/sumar existencias por ventas; no crea, edita ni borra productos
     if c = 'productos' and not isowner and not emp_ok then
       if dd or not found_ex or ex.del or ds is null then den := den || jsonb_build_array(jsonb_build_object('c', c, 'id', rid)); continue; end if;
@@ -179,7 +191,7 @@ begin
   update public.stores set seq = cur where id = p.store_id;
 
   n := 0;
-  for r in select col, id, u, del, data, seq from public.records where store_id = p.store_id and seq > since and (isowner or col <> 'proveedores') order by seq limit lim + 1 loop
+  for r in select col, id, u, del, data, seq from public.records where store_id = p.store_id and seq > since and case when isowner then true when isv then (col in ('productos','categorias','config') or (col in ('pedidos','facturas') and coalesce(data->>'userId', data->>'vendUid') = p.id::text)) else col not in ('proveedores','pedidos') end order by seq limit lim + 1 loop
     n := n + 1;
     if n > lim then more := true; exit; end if;
     lastseq := r.seq;
@@ -218,7 +230,7 @@ declare p public.profiles;
 begin
   p := public._me();
   if p.rol <> 'owner' then raise exception 'Solo el dueño puede administrar usuarios'; end if;
-  if rol not in ('owner','employee') then rol := 'employee'; end if;
+  if rol not in ('owner','employee','vendedor') then rol := 'employee'; end if;
   if not exists (select 1 from auth.users where id = uid and created_at > now() - interval '15 minutes') then raise exception 'Cuenta no válida'; end if;
   if exists (select 1 from public.profiles where id = uid) then raise exception 'Ese correo ya está registrado'; end if;
   insert into public.profiles (id, store_id, nombre, rol) values (uid, p.store_id, btrim(nombre), rol);
@@ -233,7 +245,7 @@ begin
   if p.rol <> 'owner' then raise exception 'Solo el dueño puede administrar usuarios'; end if;
   if uid = p.id and (active is false or rol <> 'owner') then raise exception 'No puedes quitarte el acceso a ti mismo'; end if;
   update public.profiles set nombre = coalesce(nullif(btrim(team_update.nombre), ''), public.profiles.nombre),
-    rol = case when team_update.rol in ('owner','employee') then team_update.rol else public.profiles.rol end,
+    rol = case when team_update.rol in ('owner','employee','vendedor') then team_update.rol else public.profiles.rol end,
     active = coalesce(team_update.active, public.profiles.active)
   where id = uid and store_id = p.store_id;
   if not found then raise exception 'Usuario no encontrado'; end if;
@@ -493,3 +505,86 @@ revoke all on function public._merge_factura(jsonb, jsonb) from public, anon, au
 grant execute on function public.catalogo_publico(text), public.catalogo_imagenes(text, text) to anon, authenticated;
 grant execute on function public.me(), public.sync(bigint, jsonb), public.team_list(),
   public.team_add(uuid, text, text), public.team_update(uuid, text, text, boolean), public.team_set_password(uuid, text), public.team_delete(uuid), public.tasas_get(), public.tasas_refrescar(), public.respaldo_crear(), public.respaldos_lista(), public.respaldo_restaurar(bigint) to authenticated;
+
+-- =====================================================================
+-- NOTIFICACIONES PUSH (llegan con la app cerrada) — requieren Firebase, ver LEEME-PUSH.md
+-- =====================================================================
+create table if not exists public.push_tokens (
+  token text primary key,
+  user_id uuid not null,
+  store_id uuid not null,
+  updated timestamptz not null default now()
+);
+create index if not exists push_tokens_user on public.push_tokens (user_id);
+create table if not exists public.push_outbox (
+  id bigserial primary key,
+  user_id uuid not null,
+  title text not null,
+  body text not null default '',
+  route text not null default '',
+  created timestamptz not null default now()
+);
+alter table public.push_tokens enable row level security;
+alter table public.push_outbox enable row level security;
+
+create or replace function public.push_register(p_token text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare p public.profiles;
+begin
+  p := public._me();
+  if p_token is null or length(p_token) < 20 or length(p_token) > 400 then raise exception 'Token no válido'; end if;
+  insert into public.push_tokens (token, user_id, store_id) values (p_token, p.id, p.store_id)
+    on conflict (token) do update set user_id = p.id, store_id = p.store_id, updated = now();
+  delete from public.push_outbox where created < now() - interval '3 days';
+  return jsonb_build_object('ok', true);
+end $$;
+create or replace function public.push_unregister(p_token text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare p public.profiles;
+begin
+  p := public._me();
+  delete from public.push_tokens where token = p_token and user_id = p.id;
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function public.push_register(text), public.push_unregister(text) from public, anon;
+grant execute on function public.push_register(text), public.push_unregister(text) to authenticated;
+
+-- Genera los avisos cuando cambian pedidos y facturas de vendedores
+create or replace function public._push_rec() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare d jsonb := new.data; od jsonb := null; mon text; tot numeric; pag numeric; sal numeric; npag int; opag int; fmt text; px text;
+begin
+  if new.col not in ('pedidos', 'facturas') or new.del or d is null then return new; end if;
+  if tg_op = 'UPDATE' then od := old.data; end if;
+  select coalesce(data->>'moneda', '$') into mon from public.records where store_id = new.store_id and col = 'config' and id = 'config' and not del;
+  mon := coalesce(mon, '$');
+  if new.col = 'pedidos' then
+    if coalesce(d->>'tipo', '') = 'RECORDATORIO' then
+      if od is null and (d->>'userId') is not null then
+        insert into public.push_outbox (user_id, title, body, route) values ((d->>'userId')::uuid, '🔔 Recordatorio de pago', coalesce(nullif(d->>'msg', ''), 'Tienes un pago pendiente.'), 'misfacturas');
+      end if;
+    elsif d->>'estado' = 'PENDIENTE' and coalesce(od->>'estado', '') <> 'PENDIENTE' then
+      insert into public.push_outbox (user_id, title, body, route)
+        select id, '🛍️ ' || coalesce(nullif(d->>'nombre', ''), 'Un vendedor') || ' envió un pedido', coalesce(jsonb_array_length(d->'items'), 0) || ' producto(s). Toca para revisarlo.', 'vendedores'
+        from public.profiles where store_id = new.store_id and rol = 'owner' and active;
+    end if;
+  elsif new.col = 'facturas' and (d->>'vendUid') is not null and d->>'tipo' = 'CREDITO' and coalesce(d->>'estado', '') <> 'ANULADA' then
+    tot := coalesce((d->>'total')::numeric, 0);
+    select coalesce(sum((a->>'monto')::numeric), 0), count(*) into pag, npag from jsonb_array_elements(coalesce(d->'abonos', '[]'::jsonb)) a;
+    sal := greatest(tot - pag, 0);
+    fmt := mon || replace(to_char(sal, 'FM999999990.00'), '.', ',');
+    if od is null or (od->>'vendUid') is null then
+      insert into public.push_outbox (user_id, title, body, route) values ((d->>'vendUid')::uuid, '🧾 Tu factura ' || coalesce(d->>'num', '') || ' fue aprobada',
+        'Total ' || mon || replace(to_char(tot, 'FM999999990.00'), '.', ',') || '. Te quedan ' || fmt || ' por pagar.', 'misfacturas');
+    else
+      opag := jsonb_array_length(coalesce(od->'abonos', '[]'::jsonb));
+      if npag > opag then
+        insert into public.push_outbox (user_id, title, body, route) values ((d->>'vendUid')::uuid, '✅ Pago registrado · ' || coalesce(d->>'num', ''),
+          case when sal > 0.004 then 'Te quedan ' || fmt || ' por pagar.' else '¡Factura pagada por completo!' end, 'misfacturas');
+      end if;
+    end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_push_rec on public.records;
+create trigger trg_push_rec after insert or update on public.records for each row execute function public._push_rec();
