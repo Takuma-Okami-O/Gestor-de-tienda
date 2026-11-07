@@ -8,7 +8,7 @@ const VR = ['pedir', 'mispedidos', 'misfacturas', 'cuenta'];
 const vendList = () => S.clientes.filter(c => c.vendedor);
 const vendDe = u => u ? S.clientes.find(c => c.vendedor && c.userId === u) : null;
 const pdNombre = p => { const v = vendDe(p.userId); return v ? v.nombre : (p.nombre || 'Vendedor'); };
-const pdAll = () => (S.pedidos || []).slice().sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+const pdAll = () => (S.pedidos || []).filter(p => p.tipo !== 'RECORDATORIO').slice().sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
 const pdPend = () => pdAll().filter(p => p.estado === 'PENDIENTE');
 const pdUnits = p => sum((p.items || []).map(i => i.qty));
 const pdResumen = p => (p.items || []).slice(0, 4).map(i => `${i.qty} × ${i.nombre}${i.sku ? ' [' + i.sku + ']' : ''}`).join(', ') + ((p.items || []).length > 4 ? '…' : '');
@@ -104,7 +104,7 @@ function vVendedores() {
     <div class="kpi"><span class="ico">${ic('receipt')}</span><div class="kl">Pedidos por revisar</div><div class="kv">${pend.length}</div><div class="ks">pendientes</div></div>
     <div class="kpi"><span class="ico">${ic('users')}</span><div class="kl">Vendedores</div><div class="kv">${vs.length}</div><div class="ks">registrados</div></div>
     <div class="kpi"><span class="ico" style="background:var(--bad-soft);color:var(--bad)">${ic('alert')}</span><div class="kl">Cuotas vencidas</div><div class="kv">${money(sum(fs.filter(vencida).map(saldo)))}</div><div class="ks">de vendedores</div></div></div>
-  <div class="row wrap" style="margin-bottom:12px"><button class="btn" data-act="vendNew">${ic('plus')} Nuevo vendedor</button></div>
+  <div class="row wrap" style="margin-bottom:12px"><button class="btn" data-act="vendNew">${ic('plus')} Nuevo vendedor</button><button class="btn soft" data-act="remNew">🔔 Recordar pagos</button></div>
   <div class="small muted b" style="margin:6px 0 4px">PEDIDOS POR REVISAR</div>
   <div class="card" style="padding:6px 14px;margin-bottom:16px"><div class="list">${pend.map(p => `<div class="li" data-act="pdRev" data-id="${p.id}"><div class="av" style="background:${grad(pdNombre(p))}">${esc(initials(pdNombre(p)))}</div><div class="mid"><div class="t">${esc(pdNombre(p))}</div><div class="s">${fdt(p.fecha)} · ${pdUnits(p)} art. — ${esc(pdResumen(p))}</div></div><span class="badge warn">Revisar</span></div>`).join('') || `<div class="empty" style="padding:18px">${ic('receipt')}<b>Sin pedidos pendientes</b>Cuando un vendedor envíe uno, aparecerá aquí.</div>`}</div></div>
   <div class="small muted b" style="margin:6px 0 4px">VENDEDORES</div>
@@ -161,7 +161,8 @@ function vendView(id) {
   const prox = pend.flatMap(f => plan(f)).filter(x => x.pend > 0).sort((a, b) => a.fecha.localeCompare(b.fecha))[0];
   modal(`${dh(esc(c.nombre), `<button class="iconbtn" data-act="vendNew" data-id="${c.id}">${ic('edit')}</button>`)}
     <div class="totals" style="margin-top:0"><div class="muted small b">SALDO PENDIENTE</div><div style="font-size:26px;font-weight:800;color:${d > 0 ? 'var(--bad)' : 'var(--ok)'}">${money(d)}</div>${prox ? `<div class="small muted">Próxima cuota: ${fdate(prox.fecha + 'T12:00:00')} · ${money(prox.pend)}</div>` : ''}</div>
-    <div class="row wrap" style="margin:12px 0">${d > 0 ? `<button class="btn ok" style="flex:1" data-act="abonoNew" data-id="${c.id}">${ic('wallet')} Registrar abono</button><button class="btn soft" style="flex:1" data-act="cliRemind" data-id="${c.id}">${ic('chat')} Recordar pago</button>` : ''}</div>
+    <div class="row wrap" style="margin:12px 0">${d > 0 ? `<button class="btn ok" style="flex:1" data-act="abonoNew" data-id="${c.id}">${ic('wallet')} Registrar abono</button><button class="btn soft" style="flex:1" data-act="cliRemind" data-id="${c.id}">${ic('chat')} Por WhatsApp</button>` : ''}</div>
+    ${d > 0 ? `<div class="row wrap" style="margin:-4px 0 12px"><button class="btn" style="flex:1" data-act="remNew" data-id="${c.id}">🔔 Enviar recordatorio a su app</button></div>` : ''}
     ${pend.length ? `<div class="small muted b" style="margin-bottom:4px">FACTURAS PENDIENTES</div><div class="list" style="margin-bottom:12px">${pend.map(f => `<div class="li" data-act="facView" data-id="${f.id}" style="padding:10px 2px"><div class="mid"><div class="t">${f.num}</div><div class="s">${fdate(f.fecha)}${f.cuotas > 1 ? ' · ' + f.cuotas + ' cuotas' : ''}</div></div><div class="end"><div class="amt">${money(saldo(f))}</div></div></div>`).join('')}</div>` : ''}
     ${peds.length ? `<div class="small muted b" style="margin-bottom:4px">PEDIDOS</div><div class="list" style="margin-bottom:12px">${peds.map(pdRow).join('')}</div>` : ''}
     ${pagos.length ? `<div class="small muted b" style="margin-bottom:4px">ÚLTIMOS ABONOS</div>${pagos.map(a => `<div class="row small" style="justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line)"><span>${fdt(a.fecha)} · ${esc(a.metodo)} · ${a.num}</span><b>${money(a.monto)}</b></div>`).join('')}` : ''}
@@ -239,6 +240,35 @@ function pdNotify() {
   toast(nu.length === 1 ? `🛍️ ${pdNombre(nu[0])} envió un pedido` : `🛍️ ${nu.length} pedidos nuevos de vendedores`, 'ok');
 }
 
+/* ---------- recordatorios de pago enviados por el dueño ---------- */
+function remInfo(c) {
+  const d = deudaCliente(c.id), px = activas().filter(f => f.clienteId === c.id).flatMap(f => plan(f)).filter(x => x.pend > 0.004).sort((a, b) => a.fecha.localeCompare(b.fecha))[0];
+  return { d, px };
+}
+function remMsg(c, extra) {
+  const { d, px } = remInfo(c), nom = String(c.nombre || '').split(' ')[0];
+  let t = `Hola ${nom}, te recordamos tu pago en ${S.config.nombre}.`;
+  if (px) { const dd = diasHasta(px.fecha); t += ` Tu cuota ${px.n}/${px.de} de ${money(px.pend)} ${dd < 0 ? 'venció el ' + fdate(px.fecha + 'T12:00:00') : dd === 0 ? 'vence hoy' : dd === 1 ? 'vence mañana' : 'vence el ' + fdate(px.fecha + 'T12:00:00')}.`; }
+  t += ` Saldo pendiente: ${money(d)}.`; if (extra) t += ' ' + extra; return t.slice(0, 300);
+}
+function remModal(sel) {
+  const l = vendList().filter(v => deudaCliente(v.id) > 0);
+  modal(`${dh('Recordar pago')}
+    <p class="muted small" style="margin-bottom:8px">Elige a quién avisar. Cada vendedor recibe una notificación en su app con su cuota y su saldo.</p>
+    <div class="list" style="margin-bottom:10px">${l.map(v => { const { d, px } = remInfo(v); return `<label class="li" style="cursor:pointer;padding:10px 2px"><input type="checkbox" class="rem-ck" value="${v.id}" ${v.userId ? '' : 'disabled'} ${v.userId && (!sel || sel.includes(v.id)) ? 'checked' : ''} style="width:20px;height:20px;accent-color:var(--accent)"><div class="mid"><div class="t">${esc(v.nombre)}</div><div class="s">${v.userId ? (px ? 'Próxima cuota ' + fdate(px.fecha + 'T12:00:00') : 'Sin cuotas') : 'Sin cuenta en la app (usa WhatsApp)'}</div></div><div class="end"><div class="amt" style="color:var(--bad)">${money(d)}</div></div></label>`; }).join('') || `<div class="empty" style="padding:16px"><b>Nadie tiene saldo pendiente</b></div>`}</div>
+    <div class="f"><label class="l">Mensaje adicional (opcional)</label><input class="in" id="rem-x" maxlength="120" placeholder="Ej. Puedes pagar por pago móvil"></div>
+    <div class="dfoot"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn" data-act="remSend">🔔 Enviar notificación</button></div>`);
+}
+function remSend() {
+  const ids = [...$$('.rem-ck:checked')].map(x => x.value); if (!ids.length) return toast('Elige al menos un vendedor', 'err');
+  const extra = ($('#rem-x')?.value || '').trim(), now = new Date().toISOString(), lim = Date.now() - 14 * 864e5;
+  let n = 0;
+  for (const id of ids) { const c = cliente(id); if (!c || !c.userId) continue;
+    S.pedidos = S.pedidos.filter(p => !(p.tipo === 'RECORDATORIO' && p.userId === c.userId && new Date(p.fecha).getTime() < lim));
+    S.pedidos.unshift({ id: uid(), fecha: now, userId: c.userId, nombre: c.nombre, tipo: 'RECORDATORIO', estado: 'RECORDATORIO', facturaId: '', items: [], msg: remMsg(c, extra) }); n++; }
+  save(); closeModal(); toast(n === 1 ? 'Recordatorio enviado' : n + ' recordatorios enviados', 'ok'); try { syncNow(); } catch { }
+}
+
 /* ---------- el vendedor: su factura, cuotas, saldo y avisos ---------- */
 const vfList = () => S.facturas.filter(f => f.estado !== 'ANULADA' && f.tipo === 'CREDITO').sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
 const vfProx = () => vfList().flatMap(f => plan(f)).filter(x => x.pend > 0.004).sort((a, b) => a.fecha.localeCompare(b.fecha))[0];
@@ -278,6 +308,11 @@ function vfNotify() {
     if (prev === undefined || n > prev) seen[f.id] = n;
   }
   if (ch) try { localStorage.setItem('gestor_vf_seen', JSON.stringify(seen)); } catch { }
+  try {
+    const rs = (() => { try { return JSON.parse(localStorage.getItem('gestor_rem_seen') || '[]'); } catch { return []; } })(), nu = (S.pedidos || []).filter(p => p.tipo === 'RECORDATORIO' && !rs.includes(p.id));
+    if (nu.length) { localStorage.setItem('gestor_rem_seen', JSON.stringify([...rs, ...nu.map(p => p.id)].slice(-100)));
+      nu.filter(p => Date.now() - new Date(p.fecha).getTime() < 3 * 864e5).sort((a, b) => a.fecha.localeCompare(b.fecha)).slice(-2).forEach(p => { pdAlert('🔔 Recordatorio de pago', p.msg || 'Tienes un pago pendiente.', 'misfacturas'); toast('🔔 ' + (p.msg || 'Recordatorio de pago'), 'ok'); }); }
+  } catch { }
   vfSchedule();
 }
 async function vfSchedule() {
@@ -309,7 +344,7 @@ Object.assign(ACT, {
     confirmDlg(`¿Eliminar a <b>${esc(c.nombre)}</b>?${c.userId ? ' Su cuenta de acceso se mantiene; elimínala en Ajustes → Equipo si ya no la necesitas.' : ''}`, 'Eliminar', () => { S.clientes = S.clientes.filter(x => x.id !== c.id); save(); $$('.overlay').forEach(o => closeModal(o)); render(); toast('Vendedor eliminado', 'ok'); }); },
   vdCopy: () => { try { navigator.clipboard.writeText(window._vcred || ''); toast('Copiado', 'ok'); } catch { toast('No se pudo copiar', 'err'); } },
   vdWA: d => { const c = cliente(d.id); openWA(c ? c.tel : '', window._vcred || ''); },
-  vfView: d => vfView(d.id),
+  vfView: d => vfView(d.id), remNew: d => { closeModal(); remModal(d.id ? [d.id] : null); }, remSend,
   vpZoom: d => { const p = prod(d.id); if (!p) return; const im = p.imagenes || [], n = vcart[p.id] || 0;
     const fila = (l, v) => v ? `<div class="row" style="justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line)"><span class="muted small b">${l}</span><span style="text-align:right;font-weight:600">${v}</span></div>` : '';
     modal(`${dh(esc(p.nombre))}
