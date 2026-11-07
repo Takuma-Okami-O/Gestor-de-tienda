@@ -230,7 +230,7 @@ const _alrt = {};
 function pdAlert(title, body, ruta) {
   const k = title + '|' + body, now = Date.now(); if (_alrt[k] && now - _alrt[k] < 120000) return; _alrt[k] = now; // misma alerta: una sola vez
   const LN = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications;
-  if (LN && isNative()) { try { LN.schedule({ notifications: [{ id: 8000 + (pdHash(k) % 900), title, body, schedule: { at: new Date(now + 800) } }] }); } catch { } return; } // en el APK solo la notificación nativa
+  if (LN && isNative()) { if (localStorage.getItem('gestor_push_on') === '1') return; try { LN.schedule({ notifications: [{ id: 8000 + (pdHash(k) % 900), title, body, schedule: { at: new Date(now + 800) } }] }); } catch { } return; } // en el APK solo la notificación nativa
   try { if ('Notification' in window && Notification.permission === 'granted') { const n = new Notification(title, { body, tag: 'gestor-' + pdHash(k) }); n.onclick = () => { window.focus(); go(ruta || 'vendedores'); }; } } catch { }
 }
 function pdNotify() {
@@ -370,3 +370,21 @@ Object.assign(INP, {
 
 /* ---------- ajustes menores ---------- */
 { const _um = userModal; userModal = function (u) { _um(u); const s = $('#us-rol'); if (s && !s.querySelector('[value=vendedor]')) { s.insertAdjacentHTML('beforeend', '<option value="vendedor">Vendedor — solo ve el stock y envía pedidos</option>'); if (u && u.rol === 'vendedor') s.value = 'vendedor'; } }; }
+
+/* ---------- notificaciones push (app cerrada) con Firebase ---------- */
+const PNP = () => window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.PushNotifications;
+async function pushInit() {
+  const P = PNP(); if (!P || !isNative() || !L.token || typeof rpc !== 'function') return;
+  try {
+    let pr = await P.checkPermissions(); if (pr.receive !== 'granted') pr = await P.requestPermissions(); if (pr.receive !== 'granted') return;
+    if (!window._pnL) {
+      window._pnL = 1;
+      P.addListener('registration', async t => { try { await rpc('push_register', { p_token: t.value }); localStorage.setItem('gestor_push_tok', t.value); localStorage.setItem('gestor_push_on', '1'); } catch { } });
+      P.addListener('registrationError', () => { try { localStorage.removeItem('gestor_push_on'); } catch { } });
+      P.addListener('pushNotificationActionPerformed', a => { const r = a && a.notification && a.notification.data && a.notification.data.route; if (r) { try { go(r); } catch { } } });
+    }
+    await P.register();
+  } catch { try { localStorage.removeItem('gestor_push_on'); } catch { } }
+}
+{ const _ea = enterApp; enterApp = function () { const r = _ea.apply(this, arguments); setTimeout(pushInit, 2500); return r; }; }
+{ const _lo = doLogout; doLogout = async function () { try { const t = localStorage.getItem('gestor_push_tok'); if (t && L.token) await rpc('push_unregister', { p_token: t }); localStorage.removeItem('gestor_push_tok'); localStorage.removeItem('gestor_push_on'); } catch { } return _lo.apply(this, arguments); }; }

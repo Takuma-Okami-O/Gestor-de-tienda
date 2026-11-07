@@ -68,6 +68,40 @@ button,input{font:inherit;color:inherit}button{border:0;cursor:pointer;backgroun
 .rw{display:flex;justify-content:space-between;align-items:center;margin-top:5px}.rw .pr{padding:0;margin:0;font-size:17px}
 .cbtn{width:36px;height:27px;border:1.5px solid #8b95a5;border-radius:99px;display:grid;place-items:center;color:#334155;background:#fff}
 .cbtn:hover{border-color:var(--a);color:var(--a)}.cbtn[disabled]{opacity:.3}
+
+/* ===== diseño profesional (móvil primero) ===== */
+body{background:#f5f3f4;-webkit-font-smoothing:antialiased}
+.hero{padding:30px 18px 70px;border-radius:0 0 30px 30px;position:relative;overflow:hidden}
+.hero:before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 88% -10%,rgba(255,255,255,.22),transparent 45%),radial-gradient(circle at 0 110%,rgba(255,255,255,.12),transparent 40%);pointer-events:none}
+.hero>*{position:relative}
+.hero .lg{width:86px;height:86px;border-radius:50%;border:3px solid rgba(255,255,255,.92);box-shadow:0 10px 28px rgba(0,0,0,.28)}
+.hero h1{font-size:26px;font-weight:800;letter-spacing:-.5px}.hero p{font-size:14px;opacity:.9}
+.wrap{margin-top:-36px;padding:0 14px 120px}
+.bar{border-radius:99px;padding:5px;box-shadow:0 10px 30px rgba(15,23,42,.16)}
+.bar input{border:0;background:transparent;padding:13px 20px;border-radius:99px;font-size:15px}
+.cats{border-radius:20px;padding:14px 6px 6px;box-shadow:0 1px 3px rgba(15,23,42,.05),0 8px 24px rgba(15,23,42,.05)}
+.cs{grid-auto-columns:84px;gap:10px 4px}
+.tl .im{width:64px;height:64px;border-radius:50%}.tl{font-size:12.5px}
+.sec{font-size:18px;font-weight:800;margin:22px 4px 2px;letter-spacing:-.2px}
+.grid{gap:14px 12px;align-items:stretch;margin-top:12px}
+.card{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(15,23,42,.06),0 6px 18px rgba(15,23,42,.06);height:100%;transition:transform .15s}
+.card:hover{transform:translateY(-2px);box-shadow:0 1px 3px rgba(15,23,42,.06),0 12px 26px rgba(15,23,42,.12)}.card:active{transform:scale(.985)}
+.card .im{aspect-ratio:4/5;border-radius:0;background:#eceaec}
+.bd{padding:10px 12px 12px;flex:1;display:flex;flex-direction:column}
+.nm{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;font-weight:700;line-height:1.3;min-height:36px;color:var(--ink)}
+.dsc{font-size:12px;line-height:1.4;min-height:34px;margin:4px 0 8px}
+.rw{margin-top:auto;padding-top:9px;border-top:1px solid #f0eef0}
+.rw .pr{font-size:17px;font-weight:800;color:var(--a)}
+.cbtn{width:38px;height:38px;border:0;border-radius:12px;background:var(--a);color:var(--on);box-shadow:0 4px 10px rgba(15,23,42,.18)}
+.cbtn:hover{filter:brightness(1.08);color:var(--on)}.cbtn:active{transform:scale(.94)}
+.tg{left:10px;top:10px;padding:4px 10px;font-size:11px;box-shadow:0 2px 8px rgba(15,23,42,.15)}
+.card.out{opacity:1}.card.out .im img,.card.out .im .ph{filter:grayscale(.85);opacity:.65}
+.cb{border-radius:20px;padding:14px 18px;bottom:16px}
+.sh{border-radius:26px 26px 0 0;padding:16px 18px 26px}
+.big{aspect-ratio:4/5;border-radius:18px;max-height:56vh;width:100%}
+.sh h2{font-size:22px;font-weight:800;margin-top:4px}.sh .pp{font-size:26px}
+.btn{border-radius:16px;box-shadow:0 8px 18px rgba(15,23,42,.18)}
+@media(min-width:700px){.grid{gap:20px 16px}}
 </style></head><body>
 <div class="hero"><div class="lg" id="lg"></div><h1 id="hn"></h1><p id="hs"></p><div class="ad" id="ha"></div></div>
 <div class="wrap"><div class="bar"><input id="q" placeholder="Buscar productos…" autocomplete="off"></div>
