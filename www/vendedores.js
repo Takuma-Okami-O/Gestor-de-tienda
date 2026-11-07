@@ -57,7 +57,7 @@ function vpRefresh() {
   const q = vq.trim().toLowerCase();
   const l = S.productos.filter(p => (vcat === 'Todas' || p.categoria === vcat) && (!q || (p.nombre + ' ' + (p.sku || '') + ' ' + (p.variante || '')).toLowerCase().includes(q))).sort((a, b) => (b.stock > 0) - (a.stock > 0) || a.nombre.localeCompare(b.nombre));
   $('#vp-list').innerHTML = l.map(p => { const n = vcart[p.id] || 0;
-    return `<div class="li" style="cursor:default"><div class="av" style="width:48px;height:48px;overflow:hidden;background:none">${thumb(p)}</div><div class="mid"><div class="t">${esc(p.nombre)}</div><div class="s">${p.sku ? 'Cód. ' + esc(p.sku) + ' · ' : ''}${p.variante ? esc(p.variante) + ' · ' : ''}${p.stock > 0 ? `<b>${p.stock}</b> disponibles` : '<span style="color:var(--bad)">Agotado</span>'}</div></div>
+    return `<div class="li" style="cursor:default"><div class="av vthumb" data-act="vpZoom" data-id="${p.id}" style="width:60px;height:60px;border-radius:12px;overflow:hidden;background:#eef0f5;cursor:zoom-in">${thumb(p)}</div><div class="mid"><div class="t">${esc(p.nombre)}</div><div class="s">${p.sku ? 'Cód. ' + esc(p.sku) + ' · ' : ''}${p.variante ? esc(p.variante) + ' · ' : ''}${p.stock > 0 ? `<b>${p.stock}</b> disponibles` : '<span style="color:var(--bad)">Agotado</span>'}</div></div>
     ${p.stock > 0 ? `<div class="step"><button data-act="vpQty" data-id="${p.id}" data-d="-1">−</button><b style="min-width:26px;text-align:center">${n}</b><button data-act="vpQty" data-id="${p.id}" data-d="1">+</button></div>` : ''}</div>`; }).join('')
     || `<div class="empty">${ic('box')}<b>Sin resultados</b>Prueba con otra búsqueda.</div>`;
   const n = vcN();
@@ -224,9 +224,13 @@ function pdReject(id) {
 
 /* ---------- avisos al dueño cuando llega un pedido ---------- */
 function pdSeen() { try { return JSON.parse(localStorage.getItem('gestor_pd_seen') || '[]'); } catch { return []; } }
+const pdHash = t => { let h = 0; for (let i = 0; i < t.length; i++) h = (Math.imul(h, 31) + t.charCodeAt(i)) | 0; return Math.abs(h); };
+const _alrt = {};
 function pdAlert(title, body, ruta) {
-  try { if ('Notification' in window && Notification.permission === 'granted') { const n = new Notification(title, { body, tag: 'gestor-pd' }); n.onclick = () => { window.focus(); go(ruta || 'vendedores'); }; } } catch { }
-  try { const LN = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications; if (LN && isNative()) LN.schedule({ notifications: [{ id: 8000 + Math.floor(Math.random() * 900), title, body, schedule: { at: new Date(Date.now() + 800) } }] }); } catch { }
+  const k = title + '|' + body, now = Date.now(); if (_alrt[k] && now - _alrt[k] < 120000) return; _alrt[k] = now; // misma alerta: una sola vez
+  const LN = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications;
+  if (LN && isNative()) { try { LN.schedule({ notifications: [{ id: 8000 + (pdHash(k) % 900), title, body, schedule: { at: new Date(now + 800) } }] }); } catch { } return; } // en el APK solo la notificación nativa
+  try { if ('Notification' in window && Notification.permission === 'granted') { const n = new Notification(title, { body, tag: 'gestor-' + pdHash(k) }); n.onclick = () => { window.focus(); go(ruta || 'vendedores'); }; } } catch { }
 }
 function pdNotify() {
   if (!isOwner() || !L.token) return; const seen = pdSeen(), nu = pdPend().filter(p => !seen.includes(p.id)); if (!nu.length) return;
@@ -265,11 +269,13 @@ function vfView(id) {
 function vfSeen() { try { return JSON.parse(localStorage.getItem('gestor_vf_seen') || '{}'); } catch { return {}; } }
 function vfNotify() {
   if (!isVend() || !L.token) return; const seen = vfSeen(); let ch = false;
+  const marca = {};
   for (const f of vfList()) {
-    const prev = seen[f.id], n = (f.abonos || []).length, px = plan(f).filter(x => x.pend > 0.004)[0];
-    if (!prev) { ch = true; const msg = `Total ${money(f.total)}.` + (px ? ` Primera cuota: ${fdate(px.fecha + 'T12:00:00')} (${money(px.pend)}).` : '') + ` Te quedan ${money(saldo(f))} por pagar.`; pdAlert('🧾 Tu factura ' + f.num + ' fue aprobada', msg, 'misfacturas'); toast('🧾 Factura ' + f.num + ' aprobada', 'ok'); }
+    const prev = seen[f.id], n = (f.abonos || []).length, px = plan(f).filter(x => x.pend > 0.004)[0]; if (prev === undefined || n > prev) { seen[f.id] = n; marca[f.id] = 1; try { localStorage.setItem('gestor_vf_seen', JSON.stringify(seen)); } catch { } }
+    if (!marca[f.id]) continue;
+    if (prev === undefined) { ch = true; const msg = `Total ${money(f.total)}.` + (px ? ` Primera cuota: ${fdate(px.fecha + 'T12:00:00')} (${money(px.pend)}).` : '') + ` Te quedan ${money(saldo(f))} por pagar.`; pdAlert('🧾 Tu factura ' + f.num + ' fue aprobada', msg, 'misfacturas'); toast('🧾 Factura ' + f.num + ' aprobada', 'ok'); }
     else if (n > prev) { ch = true; const msg = saldo(f) > 0.004 ? `Te quedan ${money(saldo(f))} por pagar.` + (px ? ` Próxima cuota: ${fdate(px.fecha + 'T12:00:00')}.` : '') : '¡Factura pagada por completo!'; pdAlert('✅ Pago registrado · ' + f.num, msg, 'misfacturas'); toast('✅ Pago registrado. ' + msg, 'ok'); }
-    if (!prev || n > prev) seen[f.id] = n;
+    if (prev === undefined || n > prev) seen[f.id] = n;
   }
   if (ch) try { localStorage.setItem('gestor_vf_seen', JSON.stringify(seen)); } catch { }
   vfSchedule();
@@ -278,7 +284,6 @@ async function vfSchedule() {
   const LN = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications; if (!LN || !isNative()) return;
   try {
     try { await LN.requestPermissions(); } catch { }
-    const ids = [...Array(200)].map((_, i) => ({ id: 7000 + i })); try { await LN.cancel({ notifications: ids }); } catch { }
     const out = [], hoy = Date.now(); let k = 0;
     for (const x of vfList().flatMap(f => plan(f)).filter(x => x.pend > 0.004)) {
       for (const [off, tx] of [[-1, 'vence mañana'], [0, 'vence hoy']]) {
@@ -286,6 +291,8 @@ async function vfSchedule() {
         out.push({ id: 7000 + k++, title: '💳 Cuota ' + x.n + '/' + x.de + ' ' + tx, body: 'Debes pagar ' + money(x.pend) + ' en ' + S.config.nombre + '.', schedule: { at } });
       }
     }
+    const ids = [...Array(200)].map((_, i) => ({ id: 7000 + i }));
+    const sig = JSON.stringify(out.map(x => [x.id, +x.schedule.at])); if (sig === window._vfSig) return; window._vfSig = sig; try { await LN.cancel({ notifications: ids }); } catch { }
     if (out.length) await LN.schedule({ notifications: out });
   } catch { }
 }
@@ -303,6 +310,7 @@ Object.assign(ACT, {
   vdCopy: () => { try { navigator.clipboard.writeText(window._vcred || ''); toast('Copiado', 'ok'); } catch { toast('No se pudo copiar', 'err'); } },
   vdWA: d => { const c = cliente(d.id); openWA(c ? c.tel : '', window._vcred || ''); },
   vfView: d => vfView(d.id),
+  vpZoom: d => { const p = prod(d.id); if (!p || !(p.imagenes && p.imagenes.length)) return; modal(`${dh(esc(p.nombre))}<img src="${p.imagenes[0]}" alt="" style="width:100%;max-height:60vh;object-fit:contain;border-radius:12px;background:#f1f5f9">${p.desc ? `<p style="margin-top:10px">${esc(p.desc)}</p>` : ''}<div class="dfoot"><button class="btn ghost" data-act="close">Cerrar</button></div>`); },
   pdRev: d => pdRev(d.id), pdOpen: d => { closeModal(); pdRev(d.id); }, pdApprove: d => pdApprove(d.id), pdReject: d => pdReject(d.id)
 });
 { const _cr = ACT.cliRemind; /* el recordatorio de pago funciona igual para vendedores */ void _cr; }
