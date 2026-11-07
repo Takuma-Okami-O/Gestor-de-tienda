@@ -666,6 +666,8 @@ const ALM = {
   K: 'gestor_alarma', def: { cajaOn: false, cajaHora: '20:00', credOn: false, credHora: '09:00', credDias: 2 },
   get() { try { return { ...ALM.def, ...JSON.parse(localStorage.getItem(ALM.K) || '{}') }; } catch { return { ...ALM.def }; } },
   set(o) { try { localStorage.setItem(ALM.K, JSON.stringify({ ...ALM.get(), ...o })); } catch { } },
+  native() { const c = window.Capacitor; return !!(c && c.isNativePlatform && c.isNativePlatform()); },
+  msg() { return ALM.native() ? (ALM.LN() ? 'Android bloqueó las notificaciones de esta app. Ve a Ajustes del teléfono > Aplicaciones > Gestor de Tienda > Notificaciones y actívalas.' : 'Esta versión instalada del APK todavía no incluye las notificaciones. Descarga e instala el APK nuevo (build más reciente) y vuelve a intentarlo.') : 'Las notificaciones están bloqueadas en este navegador. Permítelas en la configuración del sitio.'; },
   LN() { const c = window.Capacitor; return (c && c.isNativePlatform && c.isNativePlatform() && c.Plugins && c.Plugins.LocalNotifications) || null; },
   last: 0, t: null
 };
@@ -685,6 +687,7 @@ function almCajaMsg(dia) {
 }
 async function almPerm(pedir) {
   const ln = ALM.LN();
+  if (ALM.native() && !ln) return false;
   try {
     if (ln) { let p = await ln.checkPermissions(); if (p.display !== 'granted' && pedir) p = await ln.requestPermissions(); return p.display === 'granted'; }
     if ('Notification' in window) { if (Notification.permission !== 'granted' && pedir) await Notification.requestPermission(); return Notification.permission === 'granted'; }
@@ -739,7 +742,7 @@ function almCard() {
 document.addEventListener('change', async e => {
   const k = e.target.dataset && e.target.dataset.alm; if (!k) return; const el = e.target;
   if (el.type === 'checkbox') {
-    if (el.checked && !(await almPerm(true))) { el.checked = false; return toast('Las notificaciones están bloqueadas. Actívalas en los ajustes del teléfono o del navegador.', 'err'); }
+    if (el.checked && !(await almPerm(true))) { el.checked = false; return toast(ALM.msg(), 'err'); }
     ALM.set({ [k]: el.checked });
   } else if (k === 'credDias') ALM.set({ credDias: Math.max(0, Math.min(15, Math.floor(num(el.value)))) });
   else ALM.set({ [k]: el.value || ALM.def[k] });
@@ -748,7 +751,7 @@ document.addEventListener('change', async e => {
 Object.assign(ACT, {
   almGo: d => { $$('.overlay').forEach(o => closeModal(o)); go(d.r); },
   almTest: async () => {
-    if (!(await almPerm(true))) return toast('Las notificaciones están bloqueadas en este equipo.', 'err');
+    if (!(await almPerm(true))) return toast(ALM.msg(), 'err');
     const ln = ALM.LN(), a = ALM.get();
     if (ln) { try { await ln.createChannel({ id: 'gestor', name: 'Recordatorios', importance: 4, vibration: true }); } catch { } await ln.schedule({ notifications: [{ id: 9000, title: '🧾 Prueba de notificación', body: 'Así te avisaremos del cierre de caja y de los créditos por vencer.', schedule: { at: new Date(Date.now() + 3000), allowWhileIdle: true }, channelId: 'gestor' }] }); toast('Te llegará en 3 segundos. Si no llega, revisa los permisos de notificaciones del teléfono.', 'ok'); }
     else { try { new Notification('🧾 Prueba de notificación', { body: 'Así te avisaremos del cierre de caja y de los créditos por vencer.' }); } catch { } toast('Notificación enviada', 'ok'); }
