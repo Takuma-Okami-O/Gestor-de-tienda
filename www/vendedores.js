@@ -373,7 +373,9 @@ Object.assign(INP, {
 
 /* ---------- notificaciones push (app cerrada) con Firebase ---------- */
 const PNP = () => window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.PushNotifications;
+const PUSH_ACTIVO = false; // desactivado hasta confirmar la configuración de Firebase
 async function pushInit() {
+  if (!PUSH_ACTIVO) return;
   const P = PNP(); if (!P || !isNative() || !L.token || typeof rpc !== 'function') return;
   // Protección: si un intento anterior no terminó (la app se cerró), se desactiva el push 3 días en vez de repetir el cierre
   const off = +(localStorage.getItem('gestor_push_off') || 0); if (off && Date.now() - off < 3 * 864e5) return;
