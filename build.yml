@@ -1,0 +1,85 @@
+name: Construir APK y app de escritorio
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  android-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - run: npm install
+      - name: Apuntar la app al sitio publicado (actualizaciones automáticas)
+        run: |
+          OWNER=$(echo "$GITHUB_REPOSITORY" | cut -d/ -f1 | tr 'A-Z' 'a-z'); REPO=$(echo "$GITHUB_REPOSITORY" | cut -d/ -f2)
+          URL="https://${OWNER}.github.io/${REPO}/"
+          node -e "const f='capacitor.config.json',c=require('./'+f);c.server={url:'$URL',errorPath:'offline.html',cleartext:false};require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
+      - run: npx cap add android
+      - run: npx capacitor-assets generate --android
+      - name: Permisos (cámara y notificaciones)
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          for P in POST_NOTIFICATIONS SCHEDULE_EXACT_ALARM VIBRATE RECEIVE_BOOT_COMPLETED; do
+            grep -q "android.permission.$P" $M || sed -i "s#<application#<uses-permission android:name=\"android.permission.$P\" />\n    <application#" $M
+          done
+          grep -q "android.permission.CAMERA" $M || sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <application#' $M
+      - name: Iconos de Android (rosa)
+        run: |
+          pip install pillow
+          python3 scripts/android-icons.py
+      - run: npx cap sync android
+      - name: Compilar APK
+        run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GestorDeTienda-Android-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Dirección del sitio para actualizaciones automáticas
+        shell: bash
+        run: |
+          OWNER=$(echo "$GITHUB_REPOSITORY" | cut -d/ -f1 | tr 'A-Z' 'a-z'); REPO=$(echo "$GITHUB_REPOSITORY" | cut -d/ -f2)
+          echo "{\"url\":\"https://${OWNER}.github.io/${REPO}/\"}" > electron/remote.json
+      - run: npm install
+      - run: npx electron-builder --win --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GestorDeTienda-Windows
+          path: |
+            dist/*.exe
+
+  # Publica la carpeta www como sitio web (catálogo en vivo: /catalogo.html?t=...).
+  # Requiere: Settings > Pages > Source = "GitHub Actions".
+  pages:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Número de versión
+        run: echo "{\"v\":\"$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA::7}\"}" > www/version.json
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: www
+      - id: deploy
+        uses: actions/deploy-pages@v4

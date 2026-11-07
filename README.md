@@ -87,3 +87,8 @@ Copia `www/config.example.js` a `www/config.js`: `supabase` (url y key), `tema`,
 - Código obligatorio y único por producto (sin repetir, sin importar mayúsculas); avisa si ya hay códigos repetidos.
 - Caja > Cierres anteriores: exportar los últimos 30 días a **Excel (.xlsx)** y **PDF**.
 - Ajustes del negocio > Alarmas y notificaciones: hora del recordatorio de cierre de caja y aviso de créditos por vencer. En el APK usa notificaciones locales (requiere el nuevo build.yml/package.json y reinstalar el APK una vez).
+
+## Vendedores / revendedoras (nuevo)
+- Rol `vendedor`: ve el stock (sin precios ni costos) y envía pedidos. El dueño recibe aviso con el nombre registrado.
+- Sección **Vendedores** (solo dueño): registrar vendedores y crear su cuenta, revisar pedidos, editar precios/recargo/cuotas/fecha de la primera cuota, aprobar → factura a crédito (WhatsApp o imagen) y registrar abonos.
+- Ejecuta de nuevo `supabase/schema.sql` en Supabase (nuevo rol y colección `pedidos`).
