@@ -293,3 +293,10 @@ table.t td.r,table.t th.r{text-align:right}
 
 .cart-close{display:none}
 @media(max-width:999px){.cart-close{display:grid}.pos-cart>.dh:first-child{position:sticky;top:-16px;z-index:3;background:#fff;margin:-16px -16px 8px;padding:14px 16px 10px}}
+
+/* barra lateral con scroll: siempre se alcanzan todas las opciones */
+.side{overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.28) transparent}
+.side::-webkit-scrollbar{width:7px}.side::-webkit-scrollbar-thumb{background:rgba(255,255,255,.25);border-radius:6px}.side::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.45)}
+.side .brand,.side .nav,.side .foot{flex:none}.side .foot{margin-top:auto}
+@media(max-height:820px){.side{padding:14px 12px}.brand{padding:2px 8px 12px}.nav a{padding:8px 11px;font-size:14px}.navh{margin-top:8px!important}}
+@media(max-height:640px){.nav a{padding:6px 10px;font-size:13.5px}.logo{width:34px;height:34px}}

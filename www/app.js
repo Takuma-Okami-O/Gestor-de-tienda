@@ -305,6 +305,7 @@ function vInventario() {
     <div class="kpi"><span class="ico">${ic('wallet')}</span><div class="kl">Valor a precio venta</div><div class="kv">${money(sum(S.productos.map(p => p.stock * p.precio)))}</div><div class="ks">${isOwner() ? 'Costo: ' + money(sum(S.productos.map(p => p.stock * (p.costo || 0)))) : '&nbsp;'}</div></div>
     <div class="kpi"><span class="ico" style="background:var(--warn-soft);color:var(--warn)">${ic('alert')}</span><div class="kl">Stock bajo</div><div class="kv">${bajos}</div><div class="ks">requieren reposición</div></div>
   </div>
+  ${skuWarn()}
   <div class="row wrap" style="margin-bottom:10px">
     <div class="searchbox" style="min-width:200px">${ic('search')}<input class="in" id="inv-q" data-input="invQ" placeholder="Buscar por nombre, código o categoría…" value="${esc(invQ)}"></div>
     <button class="btn" data-act="prodNew">${ic('plus')} Nuevo producto</button>
@@ -332,7 +333,7 @@ function prodModal(id) {
     <div class="f"><label class="l">Fotos referenciales (hasta 8)</label><div class="imgs" id="pm-imgs"></div></div>
     <div class="f"><label class="l">Nombre del producto *</label><input class="in" id="pm-nombre" value="${esc(p?.nombre || '')}" placeholder="Ej. Camisa lino manga larga"></div>
     <div class="row"><div class="f"><label class="l">Categoría</label><select class="in" id="pm-cat">${S.categorias.map(c => `<option ${p?.categoria === c ? 'selected' : ''}>${esc(c)}</option>`).join('') || '<option>General</option>'}</select></div>
-      <div class="f"><label class="l">Código / SKU</label><input class="in" id="pm-sku" value="${esc(p?.sku || '')}" placeholder="Automático"></div></div>
+      <div class="f"><label class="l">Código único *</label><input class="in" id="pm-sku" value="${esc(p ? p.sku || '' : nextSku())}" placeholder="Ej. P0001" autocapitalize="characters" autocomplete="off" maxlength="30"></div></div>
     <div class="f ${isOwner() ? '' : 'hide'}"><label class="l">Proveedor (a quién se lo pides)</label><select class="in" id="pm-prov"><option value="">— Sin proveedor —</option>${(S.proveedores || []).map(v => `<option value="${esc(v.id)}" ${p?.provId === v.id ? 'selected' : ''}>${esc(v.nombre)}</option>`).join('')}</select></div>
     <div class="f"><label class="l">Talla / color / variante</label><input class="in" id="pm-var" value="${esc(p?.variante || '')}" placeholder="Ej. M · Azul marino"></div>
     <div class="row"><div class="f ${isOwner() ? '' : 'hide'}"><label class="l">Costo (${esc(S.config.moneda)})</label><input class="in" type="number" step="0.01" min="0" inputmode="decimal" id="pm-costo" data-input="pmCalc" value="${p ? p.costo : ''}" placeholder="0.00"></div>
@@ -357,18 +358,25 @@ function pmCalc(e) {
   if (e.target.id === 'pm-precio') { if (costo > 0) mg.value = Math.round((num(pr.value) / costo - 1) * 100); }
   else pr.value = costo > 0 ? r2(costo * (1 + num(mg.value) / 100)) : pr.value;
 }
+const skuKey = v => String(v || '').trim().toUpperCase().replace(/\s+/g, '');
+const nextSku = () => { let m = 0; S.productos.forEach(p => { const x = /^P(\d+)$/.exec(skuKey(p.sku)); if (x) m = Math.max(m, +x[1]); }); let n = Math.max(m + 1, S.productos.length + 1), c; do { c = 'P' + String(n++).padStart(4, '0'); } while (S.productos.some(p => skuKey(p.sku) === c)); return c; };
+const skuWarn = () => { const d = skuDupes(); return d.length ? `<div class="recbar" style="background:var(--warn-soft);color:var(--warn);flex-wrap:wrap"><span>⚠ <b>${d.length}</b> código${d.length === 1 ? '' : 's'} repetido${d.length === 1 ? '' : 's'}. Cada prenda debe tener un código único; edita uno de cada par:</span>${d.slice(0, 6).map(([k, a]) => `<button class="btn sm" data-act="invFixDup" data-c="${esc(k)}">${esc(k)} (${a.length})</button>`).join('')}</div>` : ''; };
+const skuDupes = () => { const g = {}; S.productos.forEach(p => { const k = skuKey(p.sku); if (k) (g[k] = g[k] || []).push(p); }); return Object.entries(g).filter(([, a]) => a.length > 1); };
 function prodSave(id) {
   const nombre = $('#pm-nombre').value.trim(); if (!nombre) return toast('Escribe el nombre del producto', 'err');
   const costo = num($('#pm-costo').value), precio = num($('#pm-precio').value);
   if (precio <= 0) return toast('Indica el precio de venta', 'err');
   const stock = Math.max(0, Math.floor(num($('#pm-stock').value)));
-  const data = { nombre, categoria: $('#pm-cat').value, sku: $('#pm-sku').value.trim(), variante: $('#pm-var').value.trim(), costo, margen: num($('#pm-margen').value), precio, stock, minimo: Math.max(0, Math.floor(num($('#pm-min').value))), desc: $('#pm-desc').value.trim(), imagenes: [...tmpImgs], catalogo: $('#pm-cat-on').checked, provId: $('#pm-prov') ? $('#pm-prov').value : (p?.provId || '') };
+  const sku = $('#pm-sku').value.trim().toUpperCase().replace(/\s+/g, '');
+  if (!sku) return toast('Escribe un código único para este producto', 'err');
+  const dup = S.productos.find(x => x.id !== id && skuKey(x.sku) === sku);
+  if (dup) { $('#pm-sku').focus(); return toast(`El código «${sku}» ya lo tiene «${dup.nombre}». Cada prenda debe tener un código único.`, 'err'); }
+  const data = { nombre, categoria: $('#pm-cat').value, sku, variante: $('#pm-var').value.trim(), costo, margen: num($('#pm-margen').value), precio, stock, minimo: Math.max(0, Math.floor(num($('#pm-min').value))), desc: $('#pm-desc').value.trim(), imagenes: [...tmpImgs], catalogo: $('#pm-cat-on').checked, provId: $('#pm-prov') ? $('#pm-prov').value : (p?.provId || '') };
   if (id) {
     const p = prod(id), antes = p.stock; Object.assign(p, data);
     if (stock !== antes) logMov(p, stock - antes, stock > antes ? 'Ingreso de mercancía' : 'Ajuste de inventario');
   } else {
     const p = { id: uid(), fecha: new Date().toISOString(), ...data };
-    if (!p.sku) p.sku = 'P' + String(S.productos.length + 1).padStart(4, '0');
     S.productos.unshift(p); if (stock > 0) logMov(p, stock, 'Ingreso inicial');
   }
   save(); closeModal(); toast('Producto guardado', 'ok'); render();
@@ -779,7 +787,7 @@ const ACT = {
   prodDel: d => { const p = prod(d.id); confirmDlg(`¿Eliminar <b>${esc(p.nombre)}</b> del inventario? Las facturas anteriores se conservan.`, 'Eliminar', () => { S.productos = S.productos.filter(x => x.id !== d.id); save(); $$('.overlay').forEach(o => closeModal(o)); toast('Producto eliminado', 'ok'); render(); }); },
   imgAdd: () => pickSource(s => { if (tmpImgs.length < 8) { tmpImgs.push(s); drawImgs(); } }, undefined, 8 - tmpImgs.length), imgRm: d => { tmpImgs.splice(+d.i, 1); drawImgs(); },
   invCat: d => { invCat = d.c; renderInvList(); },
-  catMgr, catAdd: () => { const v = $('#cm-new').value.trim(); if (!v) return; if (S.categorias.includes(v)) return toast('Esa categoría ya existe', 'err'); S.categorias.push(v); $('#cm-new').value = ''; save(); drawCats(); },
+  invFixDup: d => { invQ = d.c; render(); }, catMgr, catAdd: () => { const v = $('#cm-new').value.trim(); if (!v) return; if (S.categorias.includes(v)) return toast('Esa categoría ya existe', 'err'); S.categorias.push(v); $('#cm-new').value = ''; save(); drawCats(); },
   catDel: d => { const c = S.categorias[+d.i]; if (S.productos.some(p => p.categoria === c)) return toast('Hay productos en esta categoría. Muévelos primero.', 'err'); S.categorias.splice(+d.i, 1); save(); drawCats(); },
   posCat: d => { posCat = d.c; renderPosGrid(); },
   cartAdd: d => cartAdd(d.id),

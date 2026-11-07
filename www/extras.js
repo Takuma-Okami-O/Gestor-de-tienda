@@ -74,7 +74,7 @@ function vCaja() {
       <div id="cj-dif" class="b" style="margin-bottom:8px"></div>
       <div class="f"><label class="l">Nota (opcional)</label><input class="in" id="cj-nota" placeholder="Ej.: faltaron 2 de cambio"></div>
       <button class="btn block ok" data-act="cajaCerrar" style="padding:14px">${ic('check')} Cerrar caja del día</button>`}</div>
-    <div class="card"><h3>${ic('history')} Cierres anteriores</h3>${(S.cierres || []).slice().sort((a, b) => b.dia.localeCompare(a.dia)).slice(0, 15).map(c => `<div class="row small" data-act="cajaVer" data-d="${c.dia}" style="justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line,#eee);cursor:pointer"><span>${fdate(c.dia + 'T12:00:00')}</span><span>${money(c.ventas)} · <b style="color:${Math.abs(c.diferencia) < .005 ? 'var(--ok)' : 'var(--bad)'}">${c.diferencia > 0 ? '+' : ''}${money(c.diferencia)}</b></span></div>`).join('') || '<div class="empty" style="padding:14px">Aún no hay cierres</div>'}</div>
+    <div class="card"><h3>${ic('history')} Cierres anteriores</h3><div class="row" style="gap:8px;margin:2px 0 10px"><button class="btn sm soft" style="flex:1" data-act="cajaXlsx">${ic('download')} Excel (30 días)</button><button class="btn sm soft" style="flex:1" data-act="cajaPdf">${ic('download')} PDF (30 días)</button></div>${(S.cierres || []).slice().sort((a, b) => b.dia.localeCompare(a.dia)).slice(0, 15).map(c => `<div class="row small" data-act="cajaVer" data-d="${c.dia}" style="justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line,#eee);cursor:pointer"><span>${fdate(c.dia + 'T12:00:00')}</span><span>${money(c.ventas)} · <b style="color:${Math.abs(c.diferencia) < .005 ? 'var(--ok)' : 'var(--bad)'}">${c.diferencia > 0 ? '+' : ''}${money(c.diferencia)}</b></span></div>`).join('') || '<div class="empty" style="padding:14px">Aún no hay cierres</div>'}</div>
   </div></div>`;
 }
 function cajaTexto(c) {
@@ -550,3 +550,209 @@ Object.assign(ACT, {
   pvWA: d => { const g = pvGroups().find(g => g.v && g.v.id === d.id); if (g) openWA(g.v.tel, pvMsg(g.v, g.list)); },
   pvCopy: d => { const g = pvGroups().find(g => g.v && g.v.id === d.id); if (!g) return; const t = pvMsg(g.v, g.list); (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Pedido copiado', 'ok')).catch(() => prompt('Copia el pedido:', t)); }
 });
+
+/* =====================================================================
+   EXPORTAR CIERRES DE CAJA (30 días) A EXCEL (.xlsx) Y PDF
+   Se generan dentro de la app, sin internet y sirven también en el APK
+   ===================================================================== */
+const dmy = d => String(d || '').split('-').reverse().join('/');
+function cierres30() {
+  const hasta = todayStr(), desde = addDays(hasta, -29);
+  return { desde, hasta, list: (S.cierres || []).filter(c => c.dia >= desde && c.dia <= hasta).sort((a, b) => a.dia.localeCompare(b.dia)) };
+}
+function cierresResumen(R) {
+  const L = R.list, sum = k => r2(L.reduce((n, c) => n + (+c[k] || 0), 0));
+  const cerrados = new Set(L.map(c => c.dia)), conVentas = new Set((S.facturas || []).filter(f => f.estado !== 'ANULADA' && ymd(f.fecha) >= R.desde && ymd(f.fecha) <= R.hasta).map(f => ymd(f.fecha)));
+  return { n: L.length, ventas: sum('ventas'), cobrado: sum('cobrado'), gastos: sum('gastos'), apertura: sum('apertura'), esperado: sum('esperado'), contado: sum('contado'), dif: sum('diferencia'), sinCierre: [...conVentas].filter(d => !cerrados.has(d) && d !== R.hasta).length };
+}
+const acentoHex = () => { const v = (getComputedStyle(document.documentElement).getPropertyValue('--accent') || '').trim(); return /^#([0-9a-f]{6})$/i.test(v) ? v.slice(1).toUpperCase() : /^#([0-9a-f]{3})$/i.test(v) ? v.slice(1).split('').map(x => x + x).join('').toUpperCase() : 'A8476B'; };
+
+/* ---- escritor mínimo de .xlsx (zip sin compresión) ---- */
+const _crcT = (() => { const t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = u => { let c = 0xFFFFFFFF; for (let i = 0; i < u.length; i++) c = _crcT[(c ^ u[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function zipStore(files) {
+  const enc = new TextEncoder(), u16 = n => [n & 255, n >> 8 & 255], u32 = n => [n & 255, n >> 8 & 255, n >> 16 & 255, n >>> 24 & 255];
+  const parts = [], cen = []; let off = 0;
+  files.forEach(f => {
+    const nm = enc.encode(f.name), data = enc.encode(f.data), crc = crc32(data), sz = data.length;
+    const lh = new Uint8Array([0x50, 0x4b, 3, 4, ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(sz), ...u32(sz), ...u16(nm.length), ...u16(0), ...nm]);
+    parts.push(lh, data);
+    cen.push(new Uint8Array([0x50, 0x4b, 1, 2, ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(sz), ...u32(sz), ...u16(nm.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off), ...nm]));
+    off += lh.length + sz;
+  });
+  const cdSize = cen.reduce((n, a) => n + a.length, 0);
+  return new Blob([...parts, ...cen, new Uint8Array([0x50, 0x4b, 5, 6, 0, 0, 0, 0, ...u16(files.length), ...u16(files.length), ...u32(cdSize), ...u32(off), 0, 0])], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+const xe = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
+const colL = i => { let s = ''; for (i++; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + (i - 1) % 26) + s; return s; };
+/* celda: texto | número (dinero) | {v, s, t} ; estilos: 0 normal, 1 encabezado, 2 dinero, 3 dinero total, 4 texto total, 5 título, 6 subtítulo */
+function xlsxBlob(nombreHoja, rows, widths, freezeRow) {
+  const ac = acentoHex();
+  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0" showGridLines="0">${freezeRow ? `<pane ySplit="${freezeRow}" topLeftCell="A${freezeRow + 1}" activePane="bottomLeft" state="frozen"/>` : ''}</sheetView></sheetViews><sheetFormatPr defaultRowHeight="18"/><cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${rows.map((r, ri) => `<row r="${ri + 1}"${r.h ? ` ht="${r.h}" customHeight="1"` : ''}>${(r.c || r).map((c, ci) => {
+    if (c == null || c === '') return ''; const o = typeof c === 'object' ? c : (typeof c === 'number' ? { v: c, s: 2 } : { v: c, s: 0 }), ref = colL(ci) + (ri + 1);
+    return typeof o.v === 'number' ? `<c r="${ref}" s="${o.s || 0}"><v>${o.v}</v></c>` : `<c r="${ref}" s="${o.s || 0}" t="inlineStr"><is><t xml:space="preserve">${xe(o.v)}</t></is></c>`;
+  }).join('')}</row>`).join('')}</sheetData><pageSetup orientation="landscape" fitToHeight="0"/></worksheet>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00;[Red]\\-#,##0.00"/></numFmts><fonts count="5"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="15"/><color rgb="FF${ac}"/><name val="Calibri"/></font><font><i/><sz val="10"/><color rgb="FF6F6169"/><name val="Calibri"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF${ac}"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF8EEF2"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FFE6D9DF"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="7"><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="164" fontId="2" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="2" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>`;
+  return zipStore([
+    { name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
+    { name: '_rels/.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: 'xl/workbook.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xe(nombreHoja).slice(0, 31)}" sheetId="1" r:id="rId1"/></sheets></workbook>` },
+    { name: 'xl/_rels/workbook.xml.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+    { name: 'xl/styles.xml', data: styles }, { name: 'xl/worksheets/sheet1.xml', data: sheet }]);
+}
+function cierresXlsx() {
+  const R = cierres30(); if (!R.list.length) return null;
+  const mets = [...new Set(R.list.flatMap(c => Object.keys(c.porMetodo || {})))], T = cierresResumen(R);
+  const head = ['Día', 'Ventas', 'Cobrado', 'Gastos', 'Apertura', 'Efectivo esperado', 'Efectivo contado', 'Diferencia', ...mets.map(m => 'Cobrado ' + m), 'Cerrado por', 'Nota'];
+  const rows = [{ c: [{ v: S.config.nombre + ' · Cierres de caja', s: 5 }], h: 24 }, [{ v: `Del ${dmy(R.desde)} al ${dmy(R.hasta)} · generado ${new Date().toLocaleString()} · ${T.n} cierre(s)`, s: 6 }], [], { c: head.map(h => ({ v: h, s: 1 })), h: 34 }];
+  R.list.forEach(c => rows.push([dmy(c.dia), +c.ventas || 0, +c.cobrado || 0, +c.gastos || 0, +c.apertura || 0, +c.esperado || 0, +c.contado || 0, +c.diferencia || 0, ...mets.map(m => +((c.porMetodo || {})[m]) || 0), c.por || '', c.nota || '']));
+  const tm = mets.map(m => r2(R.list.reduce((n, c) => n + (+((c.porMetodo || {})[m]) || 0), 0)));
+  rows.push({ c: [{ v: 'TOTAL', s: 4 }, ...[T.ventas, T.cobrado, T.gastos, T.apertura, T.esperado, T.contado, T.dif, ...tm].map(v => ({ v, s: 3 })), { v: '', s: 4 }, { v: '', s: 4 }], h: 22 });
+  return xlsxBlob('Cierres de caja', rows, [12, 13, 13, 12, 12, 17, 17, 13, ...mets.map(() => 15), 18, 32], 4);
+}
+
+/* ---- escritor mínimo de PDF (tabla A4 horizontal) ---- */
+const HW = { ' ': 278, '!': 278, '"': 355, '#': 556, '$': 556, '%': 889, '&': 667, "'": 191, '(': 333, ')': 333, '*': 389, '+': 584, ',': 278, '-': 333, '.': 278, '/': 278, ':': 278, ';': 278, '<': 584, '=': 584, '>': 584, '?': 556, '@': 1015, A: 667, B: 667, C: 722, D: 722, E: 667, F: 611, G: 778, H: 722, I: 278, J: 500, K: 667, L: 556, M: 833, N: 722, O: 778, P: 667, Q: 778, R: 722, S: 667, T: 611, U: 722, V: 667, W: 944, X: 667, Y: 667, Z: 611, '[': 278, '\\': 278, ']': 278, '^': 469, _: 556, '`': 333, a: 556, b: 556, c: 500, d: 556, e: 556, f: 278, g: 556, h: 556, i: 222, j: 222, k: 500, l: 222, m: 833, n: 556, o: 556, p: 556, q: 556, r: 333, s: 500, t: 278, u: 556, v: 500, w: 722, x: 500, y: 500, z: 500, '{': 334, '|': 260, '}': 334, '~': 584 };
+const pw = (t, sz, b) => { let w = 0; for (const ch of String(t)) w += HW[ch] || 556; return w * sz / 1000 * (b ? 1.06 : 1); };
+const pfit = (t, sz, maxw, b) => { t = String(t == null ? '' : t); if (pw(t, sz, b) <= maxw) return t; while (t.length > 1 && pw(t + '...', sz, b) > maxw) t = t.slice(0, -1); return t + '...'; };
+const plat = s => String(s).replace(/[–—]/g, '-').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/…/g, '...').replace(/[^\x20-\xff]/g, '?').replace(/[\\()]/g, m => '\\' + m);
+function cierresPdf() {
+  const R = cierres30(); if (!R.list.length) return null; const T = cierresResumen(R), ac = acentoHex(), rgb = h => [0, 2, 4].map(i => (parseInt(h.substr(i, 2), 16) / 255).toFixed(3)).join(' ');
+  const W = 842, H = 595, M = 34, pages = []; let cur = null, y = 0;
+  const cols = [['Día', 62, 'l'], ['Ventas', 70, 'r'], ['Cobrado', 70, 'r'], ['Gastos', 62, 'r'], ['Apertura', 64, 'r'], ['Esperado', 70, 'r'], ['Contado', 70, 'r'], ['Diferencia', 66, 'r'], ['Cerrado por', 92, 'l'], ['Nota', 108, 'l']];
+  const tw = cols.reduce((n, c) => n + c[1], 0), sx = (W - 2 * M) / tw; cols.forEach(c => c[1] = c[1] * sx);
+  const txt = (x, yy, s, sz, bold, color) => `BT /F${bold ? 2 : 1} ${sz} Tf ${color || '0.16 0.12 0.15'} rg ${x.toFixed(1)} ${yy.toFixed(1)} Td (${plat(s)}) Tj ET\n`;
+  const rect = (x, yy, w, h, col) => `${col} rg ${x.toFixed(1)} ${yy.toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)} re f\n`;
+  const headerBand = () => rect(0, H - 58, W, 58, rgb(ac)) + txt(M, H - 28, S.config.nombre, 16, true, '1 1 1') + txt(M, H - 46, 'Cierres de caja - ultimos 30 dias (' + dmy(R.desde) + ' al ' + dmy(R.hasta) + ')', 10, false, '1 1 1');
+  const tableHead = () => { let s = rect(M, y - 20, W - 2 * M, 22, rgb(ac)), x = M; cols.forEach(c => { s += txt(c[2] === 'r' ? x + c[1] - 5 - pw(c[0], 8.5, true) : x + 5, y - 13, c[0], 8.5, true, '1 1 1'); x += c[1]; }); y -= 22; return s; };
+  const newPage = first => { cur = headerBand(); y = H - 76; if (first) { /* tarjetas de resumen */
+      const box = [['Ventas', money(T.ventas)], ['Cobrado', money(T.cobrado)], ['Gastos', money(T.gastos)], ['Diferencia acumulada', (T.dif > 0 ? '+' : '') + money(T.dif)], ['Cierres / sin cierre', T.n + ' / ' + T.sinCierre]], bw = (W - 2 * M - 4 * 10) / 5;
+      box.forEach((b, i) => { const x = M + i * (bw + 10); cur += rect(x, y - 44, bw, 44, '0.973 0.933 0.949') + txt(x + 10, y - 16, b[0], 8, false, '0.435 0.380 0.412') + txt(x + 10, y - 35, b[1], 13, true, rgb(ac)); }); y -= 62; }
+    cur += tableHead(); pages.push(cur); };
+  newPage(true); const flush = () => { pages[pages.length - 1] = cur; };
+  const rowH = 17;
+  R.list.forEach((c, i) => {
+    if (y - rowH < 46) { flush(); newPage(false); }
+    const vals = [dmy(c.dia), money(c.ventas), money(c.cobrado), money(c.gastos), money(c.apertura), money(c.esperado), money(c.contado), (c.diferencia > 0 ? '+' : '') + money(c.diferencia), c.por || '', c.nota || ''];
+    if (i % 2) cur += rect(M, y - rowH + 3, W - 2 * M, rowH, '0.988 0.969 0.976'); let x = M;
+    cols.forEach((cl, j) => { const t = pfit(vals[j], 8.5, cl[1] - 10, false), col = j === 7 ? (Math.abs(c.diferencia) < .005 ? '0.10 0.55 0.30' : '0.78 0.18 0.18') : '0.16 0.12 0.15'; cur += txt(cl[2] === 'r' ? x + cl[1] - 5 - pw(t, 8.5) : x + 5, y - rowH + 8, t, 8.5, j === 7, col); x += cl[1]; });
+    y -= rowH;
+  });
+  if (y - 24 < 46) { flush(); newPage(false); }
+  const tot = ['TOTAL', money(T.ventas), money(T.cobrado), money(T.gastos), money(T.apertura), money(T.esperado), money(T.contado), (T.dif > 0 ? '+' : '') + money(T.dif), '', ''];
+  cur += rect(M, y - 20, W - 2 * M, 22, '0.973 0.933 0.949'); let x = M; cols.forEach((cl, j) => { cur += txt(cl[2] === 'r' ? x + cl[1] - 5 - pw(tot[j], 8.5, true) : x + 5, y - 13, tot[j], 8.5, true, rgb(ac)); x += cl[1]; }); flush();
+  /* pie de página con numeración */
+  const n = pages.length; pages.forEach((p, i) => { pages[i] = p + txt(M, 24, 'Generado ' + new Date().toLocaleString() + '  -  Desarrollado por Analista de sistemas Eber Romero', 7.5, false, '0.43 0.38 0.41') + txt(W - M - 60, 24, 'Pagina ' + (i + 1) + ' de ' + n, 7.5, false, '0.43 0.38 0.41'); });
+  /* ensamblado */
+  const objs = ['<< /Type /Catalog /Pages 2 0 R >>', `<< /Type /Pages /Kids [${pages.map((_, i) => (5 + i * 2) + ' 0 R').join(' ')}] /Count ${n} >>`, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'];
+  pages.forEach((p, i) => { objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${6 + i * 2} 0 R >>`); objs.push({ stream: p }); });
+  let out = '%PDF-1.4\n', offs = []; objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n` + (typeof o === 'string' ? o : `<< /Length ${o.stream.length} >>\nstream\n${plat0(o.stream)}endstream`) + '\nendobj\n'; });
+  const xr = out.length; out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('') + `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xr}\n%%EOF`;
+  const u = new Uint8Array(out.length); for (let i = 0; i < out.length; i++) u[i] = out.charCodeAt(i) & 255; return new Blob([u], { type: 'application/pdf' });
+}
+const plat0 = s => s; // el contenido ya viene en Latin-1 (ver plat)
+Object.assign(ACT, {
+  cajaXlsx: async () => { const b = cierresXlsx(); if (!b) return toast('No hay cierres de caja en los últimos 30 días', 'err'); await saveFile(`cierres-de-caja-${todayStr()}.xlsx`, b, b.type); },
+  cajaPdf: async () => { const b = cierresPdf(); if (!b) return toast('No hay cierres de caja en los últimos 30 días', 'err'); await saveFile(`cierres-de-caja-${todayStr()}.pdf`, b, 'application/pdf'); }
+});
+
+/* =====================================================================
+   ALARMAS Y NOTIFICACIONES (cierre de caja y créditos por vencerse)
+   Configuración por equipo (localStorage). APK: notificaciones locales
+   programadas del sistema (suenan aunque la app esté cerrada).
+   Escritorio/web: aviso mientras la app está abierta.
+   ===================================================================== */
+const ALM = {
+  K: 'gestor_alarma', def: { cajaOn: false, cajaHora: '20:00', credOn: false, credHora: '09:00', credDias: 2 },
+  get() { try { return { ...ALM.def, ...JSON.parse(localStorage.getItem(ALM.K) || '{}') }; } catch { return { ...ALM.def }; } },
+  set(o) { try { localStorage.setItem(ALM.K, JSON.stringify({ ...ALM.get(), ...o })); } catch { } },
+  LN() { const c = window.Capacitor; return (c && c.isNativePlatform && c.isNativePlatform() && c.Plugins && c.Plugins.LocalNotifications) || null; },
+  last: 0, t: null
+};
+function almCuotas() { return activas().flatMap(plan).filter(x => x.pend > 0); }
+function almCredMsg(dia, dias) {
+  const cu = almCuotas(), lim = addDays(dia, dias), prox = cu.filter(x => x.fecha >= dia && x.fecha <= lim), venc = cu.filter(x => x.fecha < dia);
+  if (!prox.length && !venc.length) return null;
+  const por = {}; [...prox].sort((a, b) => a.fecha.localeCompare(b.fecha)).forEach(x => { por[x.f.clienteId] = r2((por[x.f.clienteId] || 0) + x.pend); }); const quien = Object.entries(por), top = quien.slice(0, 3).map(([id, m]) => ((cliente(id) || {}).nombre || 'Cliente').split(' ')[0] + ' ' + money(m)).join(', ');
+  const p = [];
+  if (prox.length) p.push(`${prox.length} cuota${prox.length === 1 ? '' : 's'} por vencer ${dias > 0 ? 'en ' + dias + ' día' + (dias === 1 ? '' : 's') + ' o menos' : 'hoy'}: ${top}${quien.length > 3 ? ' y ' + (quien.length - 3) + ' más' : ''}`);
+  if (venc.length) p.push(`${venc.length} vencida${venc.length === 1 ? '' : 's'}`);
+  return p.join(' · ');
+}
+function almCajaMsg(dia) {
+  if (dia === todayStr()) { const k = cajaDia(dia); return `Aún no has cerrado la caja de hoy. Ventas ${money(k.ventas)} · cobrado ${money(k.cobrado)}.`; }
+  return 'Es hora de cerrar la caja del día: cuenta el efectivo y registra el cierre.';
+}
+async function almPerm(pedir) {
+  const ln = ALM.LN();
+  try {
+    if (ln) { let p = await ln.checkPermissions(); if (p.display !== 'granted' && pedir) p = await ln.requestPermissions(); return p.display === 'granted'; }
+    if ('Notification' in window) { if (Notification.permission !== 'granted' && pedir) await Notification.requestPermission(); return Notification.permission === 'granted'; }
+  } catch { }
+  return false;
+}
+async function almSchedule() {
+  const ln = ALM.LN(); if (!ln || !L.token) return; const a = ALM.get(); ALM.last = Date.now();
+  try {
+    try { await ln.createChannel({ id: 'gestor', name: 'Recordatorios', description: 'Cierre de caja y créditos por vencer', importance: 4, visibility: 1, vibration: true }); } catch { }
+    const pend = await ln.getPending(), ids = (pend.notifications || []).filter(n => n.id >= 1000 && n.id < 3000).map(n => ({ id: n.id }));
+    if (ids.length) await ln.cancel({ notifications: ids });
+    if (!a.cajaOn && !a.credOn) return;
+    if (!(await almPerm(false))) return;
+    const list = [], now = Date.now(), dias = Math.max(0, Math.floor(num(a.credDias)));
+    for (let d = 0; d < 14; d++) {
+      const dia = addDays(todayStr(), d);
+      if (a.cajaOn) { const at = new Date(dia + 'T' + a.cajaHora + ':00'); if (at.getTime() > now && !(d === 0 && cierreDe(dia))) list.push({ id: 1000 + d, title: '🧾 Cierre de caja', body: almCajaMsg(dia), schedule: { at, allowWhileIdle: true }, channelId: 'gestor', extra: { r: 'caja' } }); }
+      if (a.credOn) { const at = new Date(dia + 'T' + a.credHora + ':00'), body = almCredMsg(dia, dias); if (at.getTime() > now && body) list.push({ id: 2000 + d, title: '⏰ Créditos por vencerse', body, schedule: { at, allowWhileIdle: true }, channelId: 'gestor', extra: { r: 'creditos' } }); }
+    }
+    if (list.length) await ln.schedule({ notifications: list });
+    ALM.n = list.length;
+  } catch (e) { ALM.err = String(e && e.message || e); }
+}
+const almSoon = () => { clearTimeout(ALM.t); ALM.t = setTimeout(almSchedule, 4000); };
+function almShow(title, body, r) {
+  try { if ('Notification' in window && Notification.permission === 'granted') { const n = new Notification(title, { body, tag: 'gestor-' + r }); n.onclick = () => { window.focus(); ACT.almGo({ r }); }; } } catch { }
+  modal(`${dh(title)}<p style="margin:6px 0 14px">${esc(body)}</p><div class="dfoot"><button class="btn ghost" data-act="close">Más tarde</button><button class="btn" data-act="almGo" data-r="${r}">${r === 'caja' ? 'Ir a Caja' : 'Ver créditos'}</button></div>`);
+}
+function almTick() {
+  if (!L.token || ALM.LN()) { if (ALM.LN() && Date.now() - ALM.last > 6 * 3600e3) almSchedule(); return; }
+  if (document.querySelector('.overlay')) return;
+  const a = ALM.get(), hm = new Date().toTimeString().slice(0, 5), hoy = todayStr(), mark = k => { try { if (localStorage.getItem(k)) return false; localStorage.setItem(k, 1); return true; } catch { return true; } };
+  if (a.cajaOn && hm >= a.cajaHora && !cierreDe(hoy) && mark('gestor_alm_caja_' + hoy)) return almShow('🧾 Cierre de caja', almCajaMsg(hoy), 'caja');
+  if (a.credOn && hm >= a.credHora) { const k = 'gestor_alm_cred_' + hoy; if (!localStorage.getItem(k)) { const m = almCredMsg(hoy, Math.max(0, Math.floor(num(a.credDias)))); try { localStorage.setItem(k, 1); } catch { } if (m) almShow('⏰ Créditos por vencerse', m, 'creditos'); } }
+}
+setInterval(almTick, 30000); setTimeout(almTick, 6000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { almTick(); almSoon(); } });
+{ const _sv = save; save = function () { _sv.apply(this, arguments); almSoon(); }; }
+try { const ln = ALM.LN(); if (ln && ln.addListener) ln.addListener('localNotificationActionPerformed', ev => { const r = ev && ev.notification && ev.notification.extra && ev.notification.extra.r; if (r && L.token) go(r); }); } catch { }
+function almCard() {
+  const a = ALM.get(), chk = (k, t) => `<label class="row" style="gap:10px;margin:8px 0 6px;cursor:pointer"><input type="checkbox" data-alm="${k}" ${a[k] ? 'checked' : ''} style="width:20px;height:20px;accent-color:var(--accent)"> <span>${t}</span></label>`;
+  return `<div class="card"><h3>${ic('alert')} Alarmas y notificaciones</h3>
+    <div class="hint small" style="margin-bottom:6px">Solo para este equipo. En el celular llegan como notificación aunque la app esté cerrada; en la computadora aparecen mientras la app esté abierta.</div>
+    ${chk('cajaOn', 'Recordarme cerrar la caja todos los días')}
+    <div class="f"><label class="l">Hora del recordatorio de caja</label><input class="in" type="time" data-alm="cajaHora" value="${esc(a.cajaHora)}"></div>
+    ${chk('credOn', 'Avisarme de los créditos a punto de vencerse')}
+    <div class="row"><div class="f"><label class="l">Hora del aviso</label><input class="in" type="time" data-alm="credHora" value="${esc(a.credHora)}"></div>
+    <div class="f"><label class="l">Avisar cuando falten (días)</label><input class="in" type="number" min="0" max="15" inputmode="numeric" data-alm="credDias" value="${a.credDias}"></div></div>
+    <button class="btn block soft" data-act="almTest">${ic('alert')} Enviar notificación de prueba</button></div>`;
+}
+document.addEventListener('change', async e => {
+  const k = e.target.dataset && e.target.dataset.alm; if (!k) return; const el = e.target;
+  if (el.type === 'checkbox') {
+    if (el.checked && !(await almPerm(true))) { el.checked = false; return toast('Las notificaciones están bloqueadas. Actívalas en los ajustes del teléfono o del navegador.', 'err'); }
+    ALM.set({ [k]: el.checked });
+  } else if (k === 'credDias') ALM.set({ credDias: Math.max(0, Math.min(15, Math.floor(num(el.value)))) });
+  else ALM.set({ [k]: el.value || ALM.def[k] });
+  almSchedule(); toast('Alarma guardada', 'ok');
+});
+Object.assign(ACT, {
+  almGo: d => { $$('.overlay').forEach(o => closeModal(o)); go(d.r); },
+  almTest: async () => {
+    if (!(await almPerm(true))) return toast('Las notificaciones están bloqueadas en este equipo.', 'err');
+    const ln = ALM.LN(), a = ALM.get();
+    if (ln) { try { await ln.createChannel({ id: 'gestor', name: 'Recordatorios', importance: 4, vibration: true }); } catch { } await ln.schedule({ notifications: [{ id: 9000, title: '🧾 Prueba de notificación', body: 'Así te avisaremos del cierre de caja y de los créditos por vencer.', schedule: { at: new Date(Date.now() + 3000), allowWhileIdle: true }, channelId: 'gestor' }] }); toast('Te llegará en 3 segundos. Si no llega, revisa los permisos de notificaciones del teléfono.', 'ok'); }
+    else { try { new Notification('🧾 Prueba de notificación', { body: 'Así te avisaremos del cierre de caja y de los créditos por vencer.' }); } catch { } toast('Notificación enviada', 'ok'); }
+    almSchedule();
+  }
+});
+PAGES.ajustes = c => cols([c.datos, c.cuenta, c.pin, almCard()], [c.equipo, c.perm, c.demo]);

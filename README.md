@@ -81,3 +81,9 @@ Copia `www/config.example.js` a `www/config.js`: `supabase` (url y key), `tema`,
 - «Vista previa» y «Ver catálogo» abren a pantalla completa con botón **Volver**.
 - Proveedores (solo dueño): asigna un proveedor a cada producto y ve qué reponer y a quién pedirlo, con mensaje de WhatsApp listo.
 - Después de actualizar, ejecuta de nuevo `supabase/schema.sql` en el SQL Editor (incluye código en el catálogo público y la colección de proveedores).
+
+## Novedades (alarmas, códigos únicos y exportación)
+- Barra lateral de escritorio con scroll: se alcanzan todas las opciones.
+- Código obligatorio y único por producto (sin repetir, sin importar mayúsculas); avisa si ya hay códigos repetidos.
+- Caja > Cierres anteriores: exportar los últimos 30 días a **Excel (.xlsx)** y **PDF**.
+- Ajustes del negocio > Alarmas y notificaciones: hora del recordatorio de cierre de caja y aviso de créditos por vencer. En el APK usa notificaciones locales (requiere el nuevo build.yml/package.json y reinstalar el APK una vez).
