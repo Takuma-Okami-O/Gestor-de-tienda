@@ -57,7 +57,7 @@ function vpRefresh() {
   const q = vq.trim().toLowerCase();
   const l = S.productos.filter(p => (vcat === 'Todas' || p.categoria === vcat) && (!q || (p.nombre + ' ' + (p.sku || '') + ' ' + (p.variante || '')).toLowerCase().includes(q))).sort((a, b) => (b.stock > 0) - (a.stock > 0) || a.nombre.localeCompare(b.nombre));
   $('#vp-list').innerHTML = l.map(p => { const n = vcart[p.id] || 0;
-    return `<div class="li" style="cursor:default"><div class="av vthumb" data-act="vpZoom" data-id="${p.id}" style="width:60px;height:60px;border-radius:12px;overflow:hidden;background:#eef0f5;cursor:zoom-in">${thumb(p)}</div><div class="mid"><div class="t">${esc(p.nombre)}</div><div class="s">${p.sku ? 'Cód. ' + esc(p.sku) + ' · ' : ''}${p.variante ? esc(p.variante) + ' · ' : ''}${p.stock > 0 ? `<b>${p.stock}</b> disponibles` : '<span style="color:var(--bad)">Agotado</span>'}</div></div>
+    return `<div class="li" style="cursor:default"><div class="av vthumb" data-act="vpZoom" data-id="${p.id}" style="width:60px;height:60px;border-radius:12px;overflow:hidden;background:#eef0f5;cursor:zoom-in">${thumb(p)}</div><div class="mid" data-act="vpZoom" data-id="${p.id}" style="cursor:pointer"><div class="t">${esc(p.nombre)}</div><div class="s">${p.sku ? 'Cód. ' + esc(p.sku) + ' · ' : ''}${p.variante ? esc(p.variante) + ' · ' : ''}${p.stock > 0 ? `<b>${p.stock}</b> disponibles` : '<span style="color:var(--bad)">Agotado</span>'}</div></div>
     ${p.stock > 0 ? `<div class="step"><button data-act="vpQty" data-id="${p.id}" data-d="-1">−</button><b style="min-width:26px;text-align:center">${n}</b><button data-act="vpQty" data-id="${p.id}" data-d="1">+</button></div>` : ''}</div>`; }).join('')
     || `<div class="empty">${ic('box')}<b>Sin resultados</b>Prueba con otra búsqueda.</div>`;
   const n = vcN();
@@ -310,7 +310,16 @@ Object.assign(ACT, {
   vdCopy: () => { try { navigator.clipboard.writeText(window._vcred || ''); toast('Copiado', 'ok'); } catch { toast('No se pudo copiar', 'err'); } },
   vdWA: d => { const c = cliente(d.id); openWA(c ? c.tel : '', window._vcred || ''); },
   vfView: d => vfView(d.id),
-  vpZoom: d => { const p = prod(d.id); if (!p || !(p.imagenes && p.imagenes.length)) return; modal(`${dh(esc(p.nombre))}<img src="${p.imagenes[0]}" alt="" style="width:100%;max-height:60vh;object-fit:contain;border-radius:12px;background:#f1f5f9">${p.desc ? `<p style="margin-top:10px">${esc(p.desc)}</p>` : ''}<div class="dfoot"><button class="btn ghost" data-act="close">Cerrar</button></div>`); },
+  vpZoom: d => { const p = prod(d.id); if (!p) return; const im = p.imagenes || [], n = vcart[p.id] || 0;
+    const fila = (l, v) => v ? `<div class="row" style="justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line)"><span class="muted small b">${l}</span><span style="text-align:right;font-weight:600">${v}</span></div>` : '';
+    modal(`${dh(esc(p.nombre))}
+      ${im.length ? `<img id="vz-img" src="${im[0]}" alt="" style="width:100%;max-height:52vh;object-fit:contain;border-radius:12px;background:#f1f5f9">` : ''}
+      ${im.length > 1 ? `<div class="row" style="gap:6px;margin-top:8px;overflow-x:auto">${im.map(x => `<img src="${x}" alt="" data-act="vzPic" style="width:54px;height:54px;object-fit:cover;border-radius:8px;cursor:pointer;flex:none">`).join('')}</div>` : ''}
+      <div style="margin-top:8px">${fila('Código', esc(p.sku || ''))}${fila('Categoría', esc(p.categoria || ''))}${fila('Tallas / colores / detalle', esc(p.variante || ''))}${fila('Disponibles', p.stock > 0 ? p.stock + ' uds' : '<span style="color:var(--bad)">Agotado</span>')}</div>
+      ${p.desc ? `<div class="small muted b" style="margin:12px 0 4px">DESCRIPCIÓN</div><div style="white-space:pre-wrap;line-height:1.45">${esc(p.desc)}</div>` : ''}
+      <div class="dfoot" style="align-items:center">${p.stock > 0 ? `<div class="step" id="vz-step"><button data-act="vzQty" data-id="${p.id}" data-d="-1">−</button><b id="vz-n" style="min-width:30px;text-align:center">${n}</b><button data-act="vzQty" data-id="${p.id}" data-d="1">+</button></div>` : ''}<button class="btn ghost" data-act="close" style="flex:1">Cerrar</button></div>`); },
+  vzPic: (d, a) => { const m = $('#vz-img'); if (m) m.src = a.src; },
+  vzQty: d => { ACT.vpQty(d); const e = $('#vz-n'); if (e) e.textContent = vcart[d.id] || 0; },
   pdRev: d => pdRev(d.id), pdOpen: d => { closeModal(); pdRev(d.id); }, pdApprove: d => pdApprove(d.id), pdReject: d => pdReject(d.id)
 });
 { const _cr = ACT.cliRemind; /* el recordatorio de pago funciona igual para vendedores */ void _cr; }
