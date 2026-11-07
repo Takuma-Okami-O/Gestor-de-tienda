@@ -63,7 +63,7 @@ const DEFAULT = () => ({
   v: 1,
   config: { nombre: 'Mi Negocio', slogan: '', whatsapp: '', direccion: '', idFiscal: '', moneda: '$', tema: (window.BIZ && BIZ.tema) || 'rosasuave', color: '', pie: '¡Gracias por su compra!', logo: '', catalogUrl: '', tasaOn: false, tasaFuente: 'bcv', tasaManual: 0, moneda2: 'Bs', empInv: false, recOn: false, recDias: 15, recFechas: '', recMsg: '', recAntes: 3, recSaludo: '', recCierre: '', msgBs: 'no' },
   categorias: ['Damas', 'Caballeros', 'Calzado', 'Accesorios'],
-  productos: [], clientes: [], facturas: [], movs: [], gastos: [], cierres: [], proveedores: []
+  productos: [], clientes: [], facturas: [], movs: [], gastos: [], cierres: [], proveedores: [], pedidos: []
 });
 let S = DEFAULT();
 const IDB = {
@@ -429,7 +429,7 @@ function renderCart() {
   <div>${c.lines.map(l => `<div class="cl"><div class="th">${thumb(l.p)}</div><div class="nm">${esc(l.p.nombre)}<small>${money(l.pr)} c/u${l.pr !== l.p.precio ? ' (base ' + money(l.p.precio) + ')' : ''}${l.p.variante ? ' · ' + esc(l.p.variante) : ''}</small>${cart.tipo === 'CREDITO' ? `<input class="in" type="number" step="0.01" min="0" inputmode="decimal" data-input="cartPrecio" data-id="${l.pid}" value="${l.pr}" title="Precio a crédito" style="width:96px;padding:4px 8px;font-size:13px;margin-top:3px">` : ''}</div>
     <div style="text-align:right"><div class="step"><button data-act="cartQty" data-id="${l.pid}" data-d="-1">−</button><b>${l.qty}</b><button data-act="cartQty" data-id="${l.pid}" data-d="1">+</button></div><div class="b small" style="margin-top:3px">${money(l.tot)}</div></div></div>`).join('')
     || `<div class="empty" style="padding:22px 6px">${ic('cart')}<b>Cuenta vacía</b>Toca los productos para agregarlos.</div>`}</div>
-  <div class="f" style="margin-top:12px"><label class="l">Cliente</label><div class="row"><select class="in" id="cart-cli" data-input="cartCli"><option value="">Cliente de mostrador</option>${S.clientes.slice().sort((a, b) => a.nombre.localeCompare(b.nombre)).map(x => `<option value="${x.id}" ${cart.clienteId === x.id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select><button class="btn soft" style="flex:none;padding:11px 13px" data-act="cliNew" data-pos="1">${ic('plus')}</button></div></div>
+  <div class="f" style="margin-top:12px"><label class="l">Cliente</label><div class="row"><select class="in" id="cart-cli" data-input="cartCli"><option value="">Cliente de mostrador</option>${S.clientes.filter(c => !c.vendedor).sort((a, b) => a.nombre.localeCompare(b.nombre)).map(x => `<option value="${x.id}" ${cart.clienteId === x.id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select><button class="btn soft" style="flex:none;padding:11px 13px" data-act="cliNew" data-pos="1">${ic('plus')}</button></div></div>
   <div class="seg" style="margin-bottom:12px"><button class="${cart.tipo === 'CONTADO' ? 'active' : ''}" data-act="cartTipo" data-t="CONTADO">💵 Contado</button><button class="${cart.tipo === 'CREDITO' ? 'active' : ''}" data-act="cartTipo" data-t="CREDITO">🤝 A crédito</button></div>
   <div class="row"><div class="f"><label class="l">Descuento (%)</label><input class="in" type="number" min="0" max="100" inputmode="decimal" data-input="cartDesc" value="${cart.desc || ''}" placeholder="0"></div>
   ${cart.tipo === 'CONTADO' ? `<div class="f"><label class="l">Método de pago</label><select class="in" data-input="cartMetodo">${METODOS.map(m => `<option ${cart.metodo === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div>` : `<div class="f"><label class="l">Vence el</label><input class="in" type="date" data-input="cartVence" value="${cart.vence}"></div>`}</div>
@@ -460,7 +460,7 @@ function checkout() {
   if (cart.tipo === 'CREDITO' && !cli) return toast('Selecciona o crea un cliente para vender a crédito', 'err');
   const now = new Date().toISOString(), costoTot = sum(c.lines.map(l => (l.p.costo || 0) * l.qty));
   const f = { id: uid(), num: nextNum(), fecha: now, clienteId: cli ? cli.id : '', clienteNombre: cli ? cli.nombre : 'Cliente de mostrador',
-    items: c.lines.map(l => ({ pid: l.pid, nombre: l.p.nombre, variante: l.p.variante || '', precio: l.pr, costo: l.p.costo || 0, qty: l.qty })),
+    items: c.lines.map(l => ({ pid: l.pid, nombre: l.p.nombre, sku: l.p.sku || '', variante: l.p.variante || '', precio: l.pr, costo: l.p.costo || 0, qty: l.qty })),
     subtotal: c.subtotal, descPct: c.pct, desc: c.desc, total: c.total, tipo: cart.tipo, metodo: cart.metodo, vence: cart.tipo === 'CREDITO' ? cart.vence : '', inicial: cart.tipo === 'CREDITO' ? c.abono : 0, cuotas: cart.tipo === 'CREDITO' ? Math.max(1, Math.min(24, Math.floor(num(cart.cuotas)) || 1)) : 0, freq: cart.freq || 15, abonos: [], estado: 'PAGADA', ganancia: r2(c.total - costoTot), tasa: (typeof XT !== 'undefined' && XT.rate()) || 0 };
   if (cart.tipo === 'CONTADO') f.abonos.push({ id: uid(), fecha: now, monto: c.total, metodo: cart.metodo, nota: 'Pago al contado' });
   else { if (c.abono > 0) f.abonos.push({ id: uid(), fecha: now, monto: c.abono, metodo: cart.metodo, nota: 'Abono inicial' }); f.estado = c.saldo > 0 ? 'PENDIENTE' : 'PAGADA'; }
@@ -539,7 +539,7 @@ function vCreditos() {
 }
 function renderClientes() {
   const q = cliQ.trim().toLowerCase(), b = $('#cli-list'); if (!b) return;
-  const list = S.clientes.filter(c => !q || (c.nombre + ' ' + (c.tel || '') + ' ' + (c.doc || '')).toLowerCase().includes(q)).map(c => ({ c, d: deudaCliente(c.id) })).sort((a, b) => b.d - a.d || a.c.nombre.localeCompare(b.c.nombre));
+  const list = S.clientes.filter(c => !c.vendedor && (!q || (c.nombre + ' ' + (c.tel || '') + ' ' + (c.doc || '')).toLowerCase().includes(q))).map(c => ({ c, d: deudaCliente(c.id) })).sort((a, b) => b.d - a.d || a.c.nombre.localeCompare(b.c.nombre));
   b.innerHTML = list.map(({ c, d }) => { const v = activas().some(f => f.clienteId === c.id && vencida(f));
     return `<div class="li" data-act="cliView" data-id="${c.id}"><div class="av" style="background:${grad(c.nombre)}">${esc(initials(c.nombre))}</div><div class="mid"><div class="t">${esc(c.nombre)}</div><div class="s">${esc(c.tel || 'Sin teléfono')}${c.doc ? ' · ' + esc(c.doc) : ''}</div></div>
     <div class="end">${d > 0 ? `<div class="amt" style="color:${v ? 'var(--bad)' : 'var(--warn)'}">${money(d)}</div><span class="badge ${v ? 'bad' : 'warn'}">${v ? 'Vencido' : 'Debe'}</span>` : '<span class="badge ok">Al día</span>'}</div></div>`; }).join('')

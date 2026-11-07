@@ -4,7 +4,7 @@
    - Dueño: sección «Vendedores» (datos, pedidos, factura a crédito con cuotas y abonos).
    ===================================================================== */
 const isVend = () => !!(L.user && L.user.rol === 'vendedor');
-const VR = ['pedir', 'mispedidos', 'cuenta'];
+const VR = ['pedir', 'mispedidos', 'misfacturas', 'cuenta'];
 const vendList = () => S.clientes.filter(c => c.vendedor);
 const vendDe = u => u ? S.clientes.find(c => c.vendedor && c.userId === u) : null;
 const pdNombre = p => { const v = vendDe(p.userId); return v ? v.nombre : (p.nombre || 'Vendedor'); };
@@ -17,6 +17,7 @@ const pdBadge = e => e === 'PENDIENTE' ? ['warn', 'Pendiente'] : e === 'APROBADO
 /* ---------- navegación ---------- */
 ROUTES.pedir = { t: 'Hacer un pedido', n: 'Pedir', i: 'box', v: () => vPedir(), after: () => vpRefresh() };
 ROUTES.mispedidos = { t: 'Mis pedidos', n: 'Mis pedidos', i: 'receipt', v: () => vMisPedidos() };
+ROUTES.misfacturas = { t: 'Mi factura y cuotas', n: 'Mi factura', i: 'wallet', v: () => vMisFacturas() };
 ROUTES.cuenta = { t: 'Mi cuenta', n: 'Mi cuenta', i: 'settings', v: () => vCuentaV() };
 ROUTES.vendedores = { t: 'Vendedores', n: 'Vendedores', i: 'users', v: () => vVendedores() };
 OWNER_ONLY.push('vendedores');
@@ -25,7 +26,7 @@ OWNER_ONLY.push('vendedores');
 const _bnV = buildNav; buildNav = function () {
   _bnV();
   if (!isVend()) { const t = $('#top-sell'); if (t) t.style.display = ''; return; }
-  const it = [['pedir', 'Pedir', 'box'], ['mispedidos', 'Mis pedidos', 'receipt'], ['cuenta', 'Mi cuenta', 'settings']];
+  const it = [['pedir', 'Pedir', 'box'], ['mispedidos', 'Pedidos', 'receipt'], ['misfacturas', 'Mi factura', 'wallet'], ['cuenta', 'Mi cuenta', 'settings']];
   const h = it.map(([k, l, i]) => `<a data-act="go" data-r="${k}" data-nav="${k}">${ic(i)}<span>${l}</span></a>`).join('');
   $('#side-nav').innerHTML = h; $('#tabbar').innerHTML = h;
   const t = $('#top-sell'); if (t) t.style.display = 'none';
@@ -45,7 +46,7 @@ const _rndV = render; render = function () {
 let vq = '', vcat = 'Todas', vcart = {}, vnota = '';
 const vcN = () => sum(Object.values(vcart));
 function vPedir() {
-  return `<div class="hint" style="margin-bottom:12px">Elige los artículos y la cantidad que quieres; al terminar toca <b>Enviar pedido</b>. El dueño lo revisará y te enviará tu factura.</div>
+  return vfBanner() + `<div class="hint" style="margin-bottom:12px">Elige los artículos y la cantidad que quieres; al terminar toca <b>Enviar pedido</b>. El dueño lo revisará y te enviará tu factura.</div>
   <div class="searchbox" style="margin-bottom:10px">${ic('search')}<input class="in" data-input="vq" placeholder="Buscar por nombre o código…" value="${esc(vq)}"></div>
   <div class="chips" id="vp-chips"></div>
   <div class="card" style="padding:6px 14px"><div class="list" id="vp-list"></div></div><div id="vp-bar"></div>`;
@@ -174,7 +175,7 @@ function pdRev(id) {
   const p = (S.pedidos || []).find(x => x.id === id); if (!p) return;
   if (p.estado !== 'PENDIENTE') return p.facturaId && factura(p.facturaId) ? facModal(p.facturaId) : toast('Pedido ' + pdBadge(p.estado)[1].toLowerCase());
   const fr = 15;
-  PR = { id, items: p.items.map(i => { const pr = prod(i.pid); return { pid: i.pid, nombre: pr ? pr.nombre : i.nombre, sku: pr ? (pr.sku || '') : (i.sku || ''), variante: pr ? (pr.variante || '') : (i.variante || ''), qty: i.qty, base: pr ? pr.precio : 0, precio: pr ? pr.precio : 0, costo: pr ? (pr.costo || 0) : 0, stock: pr ? pr.stock : 0, ok: !!pr }; }), rec: 0, desc: 0, cuotas: 1, freq: fr, vence: addDays(todayStr(), fr), ini: 0, met: 'Efectivo' };
+  PR = { id, items: p.items.map(i => { const pr = prod(i.pid); return { pid: i.pid, nombre: pr ? pr.nombre : i.nombre, sku: pr ? (pr.sku || '') : (i.sku || ''), desc: pr ? String(pr.desc || '').slice(0, 300) : '', variante: pr ? (pr.variante || '') : (i.variante || ''), qty: i.qty, base: pr ? pr.precio : 0, precio: pr ? pr.precio : 0, costo: pr ? (pr.costo || 0) : 0, stock: pr ? pr.stock : 0, ok: !!pr }; }), rec: 0, desc: 0, cuotas: 1, freq: fr, vence: addDays(todayStr(), fr), ini: 0, met: 'Efectivo' };
   modal(`${dh('Pedido de ' + esc(pdNombre(p)), `<span class="badge warn">${fdt(p.fecha)}</span>`)}
     ${p.nota ? `<div class="hint small" style="margin-bottom:10px">Nota: ${esc(p.nota)}</div>` : ''}
     <div id="pr-items">${PR.items.map((it, i) => `<div class="cl" style="align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)"><div class="nm" style="flex:1;min-width:0"><b>${esc(it.nombre)}</b><small style="display:block">${it.sku ? 'Cód. ' + esc(it.sku) : ''}${it.variante ? ' · ' + esc(it.variante) : ''} · stock ${it.stock}${it.ok ? '' : ' · <span style="color:var(--bad)">ya no existe</span>'}</small></div>
@@ -209,8 +210,8 @@ function pdApprove(id) {
   let v = vendDe(p.userId);
   if (!v) { v = { id: uid(), fecha: new Date().toISOString(), nombre: p.nombre || 'Vendedor', tel: '', doc: '', dir: '', vendedor: true, userId: p.userId }; let k = 2; while (S.clientes.some(x => x.nombre.toLowerCase() === v.nombre.toLowerCase())) v.nombre = (p.nombre || 'Vendedor') + ' ' + k++; S.clientes.push(v); }
   const now = new Date().toISOString(), costo = sum(its.map(i => i.costo * i.qty));
-  const f = { id: uid(), num: nextNum(), fecha: now, clienteId: v.id, clienteNombre: v.nombre, items: its.map(i => ({ pid: i.pid, nombre: i.nombre, sku: i.sku, variante: i.variante, precio: i.precio, costo: i.costo, qty: i.qty })),
-    subtotal: c.sub, descPct: c.pct, desc: c.desc, total: c.total, tipo: 'CREDITO', metodo: PR.met, vence: PR.vence, inicial: c.ini, cuotas: c.n, freq: PR.freq, abonos: [], estado: c.saldo > 0 ? 'PENDIENTE' : 'PAGADA', ganancia: r2(c.total - costo), tasa: (typeof XT !== 'undefined' && XT.rate()) || 0, pedidoId: p.id };
+  const f = { id: uid(), num: nextNum(), fecha: now, clienteId: v.id, clienteNombre: v.nombre, items: its.map(i => ({ pid: i.pid, nombre: i.nombre, sku: i.sku, desc: i.desc, variante: i.variante, precio: i.precio, costo: i.costo, qty: i.qty })),
+    subtotal: c.sub, descPct: c.pct, desc: c.desc, total: c.total, tipo: 'CREDITO', metodo: PR.met, vence: PR.vence, inicial: c.ini, cuotas: c.n, freq: PR.freq, abonos: [], estado: c.saldo > 0 ? 'PENDIENTE' : 'PAGADA', ganancia: r2(c.total - costo), tasa: (typeof XT !== 'undefined' && XT.rate()) || 0, pedidoId: p.id, vendUid: p.userId };
   if (c.ini > 0) f.abonos.push({ id: uid(), fecha: now, monto: c.ini, metodo: PR.met, nota: 'Abono inicial' });
   its.forEach(i => { const pr = prod(i.pid); pr.stock -= i.qty; logMov(pr, -i.qty, 'Pedido vendedor ' + f.num); });
   S.facturas.unshift(f); p.estado = 'APROBADO'; p.facturaId = f.id; p.respuesta = ($('#pr-resp')?.value || '').trim().slice(0, 200); p.resuelto = now;
@@ -223,8 +224,8 @@ function pdReject(id) {
 
 /* ---------- avisos al dueño cuando llega un pedido ---------- */
 function pdSeen() { try { return JSON.parse(localStorage.getItem('gestor_pd_seen') || '[]'); } catch { return []; } }
-function pdAlert(title, body) {
-  try { if ('Notification' in window && Notification.permission === 'granted') { const n = new Notification(title, { body, tag: 'gestor-pd' }); n.onclick = () => { window.focus(); go('vendedores'); }; } } catch { }
+function pdAlert(title, body, ruta) {
+  try { if ('Notification' in window && Notification.permission === 'granted') { const n = new Notification(title, { body, tag: 'gestor-pd' }); n.onclick = () => { window.focus(); go(ruta || 'vendedores'); }; } } catch { }
   try { const LN = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications; if (LN && isNative()) LN.schedule({ notifications: [{ id: 8000 + Math.floor(Math.random() * 900), title, body, schedule: { at: new Date(Date.now() + 800) } }] }); } catch { }
 }
 function pdNotify() {
@@ -233,7 +234,63 @@ function pdNotify() {
   nu.slice(0, 5).forEach(p => pdAlert(pdNombre(p) + ' envió un pedido', pdUnits(p) + ' artículos: ' + pdResumen(p)));
   toast(nu.length === 1 ? `🛍️ ${pdNombre(nu[0])} envió un pedido` : `🛍️ ${nu.length} pedidos nuevos de vendedores`, 'ok');
 }
-{ const _ar = applyRecs; applyRecs = function (recs) { const r = _ar(recs); try { pdNotify(); } catch { } return r; }; }
+
+/* ---------- el vendedor: su factura, cuotas, saldo y avisos ---------- */
+const vfList = () => S.facturas.filter(f => f.estado !== 'ANULADA' && f.tipo === 'CREDITO').sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+const vfProx = () => vfList().flatMap(f => plan(f)).filter(x => x.pend > 0.004).sort((a, b) => a.fecha.localeCompare(b.fecha))[0];
+const vfDeuda = () => r2(sum(vfList().map(saldo)));
+function vfBanner() {
+  if (!isVend()) return ''; const d = vfDeuda(), px = vfProx(); if (!(d > 0) || !px) return '';
+  const dd = diasHasta(px.fecha), cu = dd < 0 ? `<b style="color:var(--bad)">vencida desde el ${fdate(px.fecha + 'T12:00:00')}</b>` : dd === 0 ? '<b>vence hoy</b>' : dd === 1 ? '<b>vence mañana</b>' : `el <b>${fdate(px.fecha + 'T12:00:00')}</b>`;
+  return `<div class="recbar"><span>💳 Tu próxima cuota (${money(px.pend)}) ${cu}. Te quedan <b>${money(d)}</b> por pagar.</span><button class="btn sm" data-act="go" data-r="misfacturas">Ver mi factura</button></div>`;
+}
+function vMisFacturas() {
+  const fs = vfList(), d = vfDeuda(), px = vfProx(), pagado_ = r2(sum(fs.map(pagado)));
+  return `<div class="kpis">
+    <div class="kpi hero"><span class="ico">${ic('wallet')}</span><div class="kl">Te quedan por pagar</div><div class="kv">${money(d)}</div><div class="ks">${d > 0 ? 'saldo total' : '¡Estás al día!'}</div></div>
+    <div class="kpi"><span class="ico">${ic('alert')}</span><div class="kl">Próxima cuota</div><div class="kv" style="font-size:18px">${px ? fdate(px.fecha + 'T12:00:00') : '—'}</div><div class="ks">${px ? money(px.pend) + (px.estado === 'Vencida' ? ' · vencida' : '') : 'sin cuotas pendientes'}</div></div>
+    <div class="kpi"><span class="ico">${ic('check')}</span><div class="kl">Has pagado</div><div class="kv">${money(pagado_)}</div><div class="ks">${fs.length} factura${fs.length === 1 ? '' : 's'}</div></div></div>
+  ${fs.length ? fs.map(f => { const [k, t] = facEstado(f); return `<div class="card" style="margin-bottom:10px;cursor:pointer" data-act="vfView" data-id="${f.id}"><div class="dh" style="margin-bottom:4px"><b>Factura ${f.num}</b><span class="badge ${k}">${t}</span></div><div class="small muted">${fdate(f.fecha)} · ${f.items.reduce((n, i) => n + i.qty, 0)} artículos · total ${money(f.total)}</div><div class="row small" style="justify-content:space-between;margin-top:6px"><span>Saldo pendiente</span><b style="color:${saldo(f) > 0 ? 'var(--bad)' : 'var(--ok)'}">${money(saldo(f))}</b></div></div>`; }).join('') : `<div class="empty">${ic('receipt')}<b>Aún no tienes facturas</b>Cuando el dueño apruebe un pedido, tu factura aparecerá aquí con sus cuotas.</div>`}`;
+}
+function vfView(id) {
+  const f = factura(id); if (!f) return; const [k, t] = facEstado(f), pl = plan(f);
+  modal(`${dh('Factura ' + f.num, `<span class="badge ${k}">${t}</span>`)}
+    <div class="small muted" style="margin-bottom:8px">${fdt(f.fecha)}</div>
+    <div class="list" style="margin-bottom:10px">${f.items.map(i => `<div class="li" style="cursor:default;align-items:flex-start;padding:9px 2px"><div class="mid" style="white-space:normal"><div class="t" style="white-space:normal">${esc(i.nombre)}</div><div class="s" style="white-space:normal">${i.sku ? 'Cód. ' + esc(i.sku) : ''}${i.variante ? ' · ' + esc(i.variante) : ''}</div>${i.desc ? `<div class="s" style="white-space:normal">${esc(i.desc)}</div>` : ''}<div class="s">${i.qty} × ${money(i.precio)}</div></div><b>${money(i.precio * i.qty)}</b></div>`).join('')}</div>
+    <div class="totals">${f.descPct ? `<div class="tr"><span>Subtotal</span><span>${money(f.subtotal)}</span></div><div class="tr"><span>Descuento ${f.descPct}%</span><span>−${money(f.desc)}</span></div>` : ''}<div class="tr big"><span>Total</span><span>${money(f.total)}</span></div><div class="tr"><span>Pagado</span><span>${money(pagado(f))}</span></div><div class="tr b"><span>Te quedan por pagar</span><span style="color:${saldo(f) > 0 ? 'var(--bad)' : 'var(--ok)'}">${money(saldo(f))}</span></div></div>
+    ${pl.length ? planHTML(pl, true) : ''}
+    ${f.abonos.length ? `<div class="small muted b" style="margin:10px 0 4px">PAGOS REGISTRADOS</div>${f.abonos.map(a => `<div class="row small" style="justify-content:space-between;padding:3px 0"><span>${fdt(a.fecha)} · ${esc(a.metodo)}</span><b>${money(a.monto)}</b></div>`).join('')}` : ''}
+    <div class="dfoot"><button class="btn soft" data-act="facImg" data-id="${f.id}">${ic('image')} Guardar / compartir imagen</button><button class="btn ghost" data-act="close">Cerrar</button></div>`, 'wide');
+}
+function vfSeen() { try { return JSON.parse(localStorage.getItem('gestor_vf_seen') || '{}'); } catch { return {}; } }
+function vfNotify() {
+  if (!isVend() || !L.token) return; const seen = vfSeen(); let ch = false;
+  for (const f of vfList()) {
+    const prev = seen[f.id], n = (f.abonos || []).length, px = plan(f).filter(x => x.pend > 0.004)[0];
+    if (!prev) { ch = true; const msg = `Total ${money(f.total)}.` + (px ? ` Primera cuota: ${fdate(px.fecha + 'T12:00:00')} (${money(px.pend)}).` : '') + ` Te quedan ${money(saldo(f))} por pagar.`; pdAlert('🧾 Tu factura ' + f.num + ' fue aprobada', msg, 'misfacturas'); toast('🧾 Factura ' + f.num + ' aprobada', 'ok'); }
+    else if (n > prev) { ch = true; const msg = saldo(f) > 0.004 ? `Te quedan ${money(saldo(f))} por pagar.` + (px ? ` Próxima cuota: ${fdate(px.fecha + 'T12:00:00')}.` : '') : '¡Factura pagada por completo!'; pdAlert('✅ Pago registrado · ' + f.num, msg, 'misfacturas'); toast('✅ Pago registrado. ' + msg, 'ok'); }
+    if (!prev || n > prev) seen[f.id] = n;
+  }
+  if (ch) try { localStorage.setItem('gestor_vf_seen', JSON.stringify(seen)); } catch { }
+  vfSchedule();
+}
+async function vfSchedule() {
+  const LN = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications; if (!LN || !isNative()) return;
+  try {
+    try { await LN.requestPermissions(); } catch { }
+    const ids = [...Array(200)].map((_, i) => ({ id: 7000 + i })); try { await LN.cancel({ notifications: ids }); } catch { }
+    const out = [], hoy = Date.now(); let k = 0;
+    for (const x of vfList().flatMap(f => plan(f)).filter(x => x.pend > 0.004)) {
+      for (const [off, tx] of [[-1, 'vence mañana'], [0, 'vence hoy']]) {
+        const at = new Date(addDays(x.fecha, off) + 'T09:00:00'); if (at.getTime() <= hoy || k >= 190) continue;
+        out.push({ id: 7000 + k++, title: '💳 Cuota ' + x.n + '/' + x.de + ' ' + tx, body: 'Debes pagar ' + money(x.pend) + ' en ' + S.config.nombre + '.', schedule: { at } });
+      }
+    }
+    if (out.length) await LN.schedule({ notifications: out });
+  } catch { }
+}
+{ const _ar = applyRecs; applyRecs = function (recs) { const r = _ar(recs); try { pdNotify(); vfNotify(); } catch { } return r; }; }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && isVend()) { try { vfSchedule(); } catch { } } });
 
 /* ---------- acciones ---------- */
 Object.assign(ACT, {
@@ -245,6 +302,7 @@ Object.assign(ACT, {
     confirmDlg(`¿Eliminar a <b>${esc(c.nombre)}</b>?${c.userId ? ' Su cuenta de acceso se mantiene; elimínala en Ajustes → Equipo si ya no la necesitas.' : ''}`, 'Eliminar', () => { S.clientes = S.clientes.filter(x => x.id !== c.id); save(); $$('.overlay').forEach(o => closeModal(o)); render(); toast('Vendedor eliminado', 'ok'); }); },
   vdCopy: () => { try { navigator.clipboard.writeText(window._vcred || ''); toast('Copiado', 'ok'); } catch { toast('No se pudo copiar', 'err'); } },
   vdWA: d => { const c = cliente(d.id); openWA(c ? c.tel : '', window._vcred || ''); },
+  vfView: d => vfView(d.id),
   pdRev: d => pdRev(d.id), pdOpen: d => { closeModal(); pdRev(d.id); }, pdApprove: d => pdApprove(d.id), pdReject: d => pdReject(d.id)
 });
 { const _cr = ACT.cliRemind; /* el recordatorio de pago funciona igual para vendedores */ void _cr; }

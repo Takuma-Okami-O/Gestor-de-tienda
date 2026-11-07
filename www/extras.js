@@ -411,7 +411,7 @@ msgBloque = function (c, d) {
 };
 facText = function (f) {
   const c = S.config, p = plan(f), L2 = [`🏪 *${c.nombre}*`, c.slogan ? `_${c.slogan}_` : '', c.idFiscal ? `ID fiscal: ${c.idFiscal}` : '', '━━━━━━━━━━━━━━━', `🧾 *FACTURA ${f.num}*`, `📅 ${fdt(f.fecha)}`, `👤 Cliente: ${f.clienteNombre}`, '━━━━━━━━━━━━━━━', '🛍️ *Detalle*'].filter(x => x !== '');
-  f.items.forEach(i => L2.push(`${i.qty} × ${i.nombre}${i.variante ? ' (' + i.variante + ')' : ''} — ${money(i.precio * i.qty)}`));
+  f.items.forEach(i => L2.push(`${i.qty} × ${i.nombre}${i.variante ? ' (' + i.variante + ')' : ''}${i.sku ? ' [Cód. ' + i.sku + ']' : ''} — ${money(i.precio * i.qty)}`));
   L2.push('━━━━━━━━━━━━━━━');
   if (f.descPct) L2.push(`🏷️ Descuento ${f.descPct}%: −${money(f.desc)}`);
   L2.push(`💰 *TOTAL: ${mB(f.total)}*`);
@@ -449,7 +449,7 @@ facHTML = function (f) {
     <div class="box"><h4>Facturado a</h4><div><b>${esc(f.clienteNombre)}</b>${cli && cli.doc ? `<br>${esc(cli.doc)}` : ''}${cli && cli.tel ? `<br><span class="mut">${esc(cli.tel)}</span>` : ''}${cli && cli.dir ? `<br><span class="mut">${esc(cli.dir)}</span>` : ''}</div></div>
     <div class="box" style="max-width:170px;text-align:center"><h4>Estado</h4><div class="stamp">${stamp[1]}</div><div class="mut" style="margin-top:8px">${cred ? 'Venta a crédito' : 'Contado · ' + esc(f.metodo || '')}</div></div></div>
   <table><thead><tr><th>Descripción</th><th class="r">Cant.</th><th class="r">Precio</th><th class="r">Importe</th></tr></thead><tbody>
-  ${f.items.map(i => `<tr><td><b>${esc(i.nombre)}</b>${i.variante ? `<br><span class="mut">${esc(i.variante)}</span>` : ''}</td><td class="r">${i.qty}</td><td class="r">${money(i.precio)}</td><td class="r"><b>${money(i.precio * i.qty)}</b>${bs(i.precio * i.qty)}</td></tr>`).join('')}</tbody></table>
+  ${f.items.map(i => `<tr><td><b>${esc(i.nombre)}</b>${i.variante || i.sku ? `<br><span class="mut">${i.sku ? 'Cód. ' + esc(i.sku) : ''}${i.sku && i.variante ? ' · ' : ''}${esc(i.variante || '')}</span>` : ''}${i.desc ? `<br><span class="mut" style="font-size:11px">${esc(String(i.desc).slice(0, 140))}</span>` : ''}</td><td class="r">${i.qty}</td><td class="r">${money(i.precio)}</td><td class="r"><b>${money(i.precio * i.qty)}</b>${bs(i.precio * i.qty)}</td></tr>`).join('')}</tbody></table>
   <div class="tw"><div class="l">${cred && p.length ? `<h5>Plan de cuotas</h5><table><thead><tr><th>Cuota</th><th>Fecha</th><th class="r">Monto</th><th class="r">Estado</th></tr></thead><tbody>${p.map(x => `<tr><td>${x.n} de ${x.de}</td><td>${fdate(x.fecha + 'T12:00:00')}</td><td class="r">${money(x.monto)}</td><td class="r">${x.estado === 'Pagada' ? '✔ Pagada' : 'Pendiente'}</td></tr>`).join('')}</tbody></table>` : ''}
     ${f.abonos.length && cred ? `<h5>Pagos registrados</h5><table><tbody>${f.abonos.map(a => `<tr><td>${fdt(a.fecha)}</td><td>${esc(a.metodo)}</td><td class="r">${money(a.monto)}</td></tr>`).join('')}</tbody></table>` : ''}</div>
     <div class="tot"><div><span>Subtotal</span><span>${money(f.subtotal)}</span></div>${f.descPct ? `<div><span>Descuento ${f.descPct}%</span><span>−${money(f.desc)}</span></div>` : ''}<div class="big"><span>TOTAL</span><span>${money(f.total)}</span></div>${r ? `<div class="bs"><span>Referencia en ${esc(XT.sym())}</span><span>${NF.format(f.total * r)}</span></div>` : ''}
