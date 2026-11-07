@@ -340,7 +340,7 @@ Object.assign(ACT, {
   vpQty: d => { const p = prod(d.id); if (!p) return; const n = (vcart[d.id] || 0) + (+d.d); if (n > p.stock) return toast('Solo hay ' + p.stock + ' disponibles', 'err'); if (n <= 0) delete vcart[d.id]; else vcart[d.id] = n; vpRefresh(); },
   vpSend: vpSendModal, vpConfirm,
   vendNew: d => { closeModal(); vendModal(d.id); }, vendSave: d => vendSave(d.id), vendView: d => vendView(d.id), vdPw: () => { $('#vd-pw').value = genPw(); },
-  vendDel: d => { const c = cliente(d.id); if (!c) return; if (S.facturas.some(f => f.clienteId === c.id)) return toast('Tiene facturas registradas: no se puede eliminar', 'err');
+  vendDel: d => { const c = cliente(d.id); if (!c) return; if (S.facturas.some(f => f.clienteId === c.id && f.estado !== 'ANULADA')) return toast('Tiene facturas activas: no se puede eliminar', 'err');
     confirmDlg(`¿Eliminar a <b>${esc(c.nombre)}</b>?${c.userId ? ' Su cuenta de acceso se mantiene; elimínala en Ajustes → Equipo si ya no la necesitas.' : ''}`, 'Eliminar', () => { S.clientes = S.clientes.filter(x => x.id !== c.id); save(); $$('.overlay').forEach(o => closeModal(o)); render(); toast('Vendedor eliminado', 'ok'); }); },
   vdCopy: () => { try { navigator.clipboard.writeText(window._vcred || ''); toast('Copiado', 'ok'); } catch { toast('No se pudo copiar', 'err'); } },
   vdWA: d => { const c = cliente(d.id); openWA(c ? c.tel : '', window._vcred || ''); },
@@ -373,10 +373,11 @@ Object.assign(INP, {
 
 /* ---------- notificaciones push (app cerrada) con Firebase ---------- */
 const PNP = () => window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.PushNotifications;
-const PUSH_ACTIVO = false; // desactivado hasta confirmar la configuración de Firebase
+const PUSH_ACTIVO = true; // solo actúa si este APK incluye el plugin (lo instala build.yml cuando Firebase está bien configurado)
 async function pushInit() {
   if (!PUSH_ACTIVO) return;
-  const P = PNP(); if (!P || !isNative() || !L.token || typeof rpc !== 'function') return;
+  let disp = false; try { disp = !!(window.Capacitor && Capacitor.isPluginAvailable && Capacitor.isPluginAvailable('PushNotifications')); } catch { }
+  const P = disp ? PNP() : null; if (!P || !isNative() || !L.token || typeof rpc !== 'function') return;
   // Protección: si un intento anterior no terminó (la app se cerró), se desactiva el push 3 días en vez de repetir el cierre
   const off = +(localStorage.getItem('gestor_push_off') || 0); if (off && Date.now() - off < 3 * 864e5) return;
   if (localStorage.getItem('gestor_push_try') === '1') { localStorage.setItem('gestor_push_off', String(Date.now())); localStorage.removeItem('gestor_push_try'); return; }
