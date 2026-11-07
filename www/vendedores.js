@@ -375,16 +375,22 @@ Object.assign(INP, {
 const PNP = () => window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.PushNotifications;
 async function pushInit() {
   const P = PNP(); if (!P || !isNative() || !L.token || typeof rpc !== 'function') return;
+  // Protección: si un intento anterior no terminó (la app se cerró), se desactiva el push 3 días en vez de repetir el cierre
+  const off = +(localStorage.getItem('gestor_push_off') || 0); if (off && Date.now() - off < 3 * 864e5) return;
+  if (localStorage.getItem('gestor_push_try') === '1') { localStorage.setItem('gestor_push_off', String(Date.now())); localStorage.removeItem('gestor_push_try'); return; }
+  localStorage.setItem('gestor_push_try', '1');
   try {
-    let pr = await P.checkPermissions(); if (pr.receive !== 'granted') pr = await P.requestPermissions(); if (pr.receive !== 'granted') return;
+    let pr = await P.checkPermissions(); if (pr.receive !== 'granted') pr = await P.requestPermissions();
+    if (pr.receive !== 'granted') { localStorage.removeItem('gestor_push_try'); return; }
     if (!window._pnL) {
       window._pnL = 1;
-      P.addListener('registration', async t => { try { await rpc('push_register', { p_token: t.value }); localStorage.setItem('gestor_push_tok', t.value); localStorage.setItem('gestor_push_on', '1'); } catch { } });
-      P.addListener('registrationError', () => { try { localStorage.removeItem('gestor_push_on'); } catch { } });
+      P.addListener('registration', async t => { try { localStorage.removeItem('gestor_push_try'); await rpc('push_register', { p_token: t.value }); localStorage.setItem('gestor_push_tok', t.value); localStorage.setItem('gestor_push_on', '1'); } catch { } });
+      P.addListener('registrationError', () => { try { localStorage.removeItem('gestor_push_try'); localStorage.removeItem('gestor_push_on'); } catch { } });
       P.addListener('pushNotificationActionPerformed', a => { const r = a && a.notification && a.notification.data && a.notification.data.route; if (r) { try { go(r); } catch { } } });
     }
     await P.register();
-  } catch { try { localStorage.removeItem('gestor_push_on'); } catch { } }
+    setTimeout(() => { try { if (localStorage.getItem('gestor_push_try') === '1') localStorage.removeItem('gestor_push_try'); } catch { } }, 20000); // sin cierre en 20 s: se considera estable
+  } catch { try { localStorage.removeItem('gestor_push_try'); localStorage.removeItem('gestor_push_on'); } catch { } }
 }
-{ const _ea = enterApp; enterApp = function () { const r = _ea.apply(this, arguments); setTimeout(pushInit, 2500); return r; }; }
+{ const _ea = enterApp; enterApp = function () { const r = _ea.apply(this, arguments); setTimeout(pushInit, 6000); return r; }; }
 { const _lo = doLogout; doLogout = async function () { try { const t = localStorage.getItem('gestor_push_tok'); if (t && L.token) await rpc('push_unregister', { p_token: t }); localStorage.removeItem('gestor_push_tok'); localStorage.removeItem('gestor_push_on'); } catch { } return _lo.apply(this, arguments); }; }
