@@ -115,7 +115,7 @@ function hstr(s) { let h1 = 0xdeadbeef ^ s.length, h2 = 0x41c6ce57 ^ s.length; f
 function hashRec(col, r) { if (col === 'productos' && r.imagenes && r.imagenes.length) return JSON.stringify({ ...r, imagenes: r.imagenes.map(s => s.length + ':' + s.slice(-40)) }); return JSON.stringify(r); }
 const singleData = c => c === 'config' ? S.config : S.categorias;
 function track() {
-  const now = nowU(); let ch = false;
+  const now = nowU(); let ch = false, guardTrip = false; const bulk = Y.bulkOk && Date.now() - Y.bulkOk < 120000; // bulk: el usuario pidió «Borrar todo» o «Restaurar archivo»
   for (const col of COLS) {
     const arr = S[col], meta = Y.meta[col] || (Y.meta[col] = {}), seen = new Set();
     for (const r of arr) {
@@ -124,16 +124,21 @@ function track() {
       if (!m) { meta[r.id] = { u: now, h, s: 0 }; ch = true; }
       else if (m.h !== h || m.d) { m.u = now; m.h = h; m.s = 0; m.d = 0; ch = true; }
     }
+    if (col !== 'movs') { // protección: si desaparece de golpe gran parte de una lista, no es un borrado del usuario (datos locales dañados o vacíos)
+      const vivos = Object.keys(meta).filter(id => !meta[id].d), perdidos = vivos.filter(id => !seen.has(id));
+      if (!bulk && (Y.rec || perdidos.length > Math.max(5, vivos.length * 0.3))) { if (!Y.rec) { Y.cursor = 0; Y.rec = 1; guardTrip = true; } for (const id of perdidos) seen.add(id); } // mientras dure la re-descarga (Y.rec) no se marca NADA como borrado // Y.rec: se re-descarga UNA vez (si no, cada ronda volvería a cursor 0)
+    }
     for (const id in meta) {
       const m = meta[id]; if (seen.has(id) || m.d) continue;
       if (col === 'movs') { delete meta[id]; continue; } // el historial de movimientos solo se recorta localmente
-      meta[id] = { u: now, h: '', s: 0, d: 1 }; ch = true;
+      meta[id] = { u: now, h: '', s: 0, d: 1, b: bulk ? 1 : 0 }; ch = true;
     }
   }
   for (const col of SINGLE) {
     const meta = Y.meta[col] || (Y.meta[col] = {}), h = hstr(JSON.stringify(singleData(col))), m = meta[col];
     if (!m) { meta[col] = { u: now, h, s: 0 }; ch = true; } else if (m.h !== h) { m.u = now; m.h = h; m.s = 0; ch = true; }
   }
+  if (guardTrip) { ch = true; setTimeout(() => { try { toast('Se detectaron datos locales incompletos: se están recuperando desde la nube', 'err'); } catch (e) { } scheduleSync(300); }, 400); }
   return ch;
 }
 function pendingCount() { let n = 0; for (const c in Y.meta) for (const id in Y.meta[c]) if (!Y.meta[c][id].s) n++; return n; }
@@ -148,7 +153,7 @@ function collectPush(maxRecs = 150, maxBytes = 3e6) {
       if (items.length >= maxRecs || bytes > maxBytes) return { items, snap };
       let rec = null;
       if (!m.d) { rec = SINGLE.includes(col) ? singleData(col) : S[col].find(x => x.id === id); if (!rec) continue; bytes += JSON.stringify(rec).length; }
-      const it = { c: col, id, u: m.u, d: m.d ? 1 : 0, data: m.d ? null : rec };
+      const it = { c: col, id, u: m.u, d: m.d ? 1 : 0, data: m.d ? null : rec }; if (m.d && m.b) it.b = 1;
       // stock como diferencia respecto al último valor sincronizado: ventas simultáneas en varios equipos se suman, no se pisan
       if (col === 'productos' && !m.d && m.sb !== undefined) { it.ds = (+rec.stock || 0) - m.sb; it.op = (L.dev || '') + ':' + m.u + ':' + m.sb; }
       items.push(it);
@@ -182,8 +187,12 @@ function applyRecs(recs) {
     const idx = arr.findIndex(x => x.id === r.id);
     if (r.d) { if (idx > -1) arr.splice(idx, 1); meta[r.id] = { u: r.u, h: '', s: 1, d: 1 }; changed = true; continue; }
     const rec = r.data; if (!rec || typeof rec !== 'object') continue; rec.id = r.id;
+    // RESCATE DE FOTOS: un equipo que lleva >3 días sin sincronizar (copia vieja) conserva sus fotos si la nube ya no las tiene, y las vuelve a subir
+    let rescued = false;
+    if (r.c === 'productos' && idx > -1 && (!rec.imagenes || !rec.imagenes.length) && arr[idx].imagenes && arr[idx].imagenes.length && Y.last && Date.now() - Y.last > 3 * 864e5) { rec.imagenes = arr[idx].imagenes; rescued = true; }
     if (idx > -1) arr[idx] = rec; else arr.push(rec);
     meta[r.id] = { u: r.u, h: hstr(hashRec(r.c, rec)), s: 1 }; if (r.c === 'productos') meta[r.id].sb = +rec.stock || 0; changed = true;
+    if (rescued) { meta[r.id].u = nowU(); meta[r.id].s = 0; }
   }
   if (changed) {
     const byDate = (a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''));
@@ -226,13 +235,15 @@ async function syncNow(manual) {
     if (!Y.pulled) { // primera descarga completa de la tienda, antes de enviar nada
       let more = true;
       while (more) { const r = await api('/api/sync', { since: Y.cursor, push: [] }); Y.skew = r.serverTime - Date.now(); if (applyRecs(r.recs)) changedUI = true; Y.cursor = r.cursor; more = r.more; }
-      Y.pulled = true; await saveNow();
+      Y.rec = 0; Y.pulled = true; await saveNow();
     }
     for (let round = 0; round < 60; round++) {
       track(); const batch = collectPush();
       const r = await api('/api/sync', { since: Y.cursor, push: batch.items }); Y.skew = r.serverTime - Date.now();
       markPushed(batch, r); (r.denied || []).forEach(d => { const m = (Y.meta[d.c] || {})[d.id]; if (m) m.s = 1; });
       if (applyRecs(r.recs)) changedUI = true; Y.cursor = r.cursor;
+      if (r.guard) { Y.cursor = 0; Y.rec = 1; r.more = true; setTimeout(() => { try { toast('Se bloqueó un borrado masivo sospechoso: tus datos se recuperan desde la nube', 'err'); } catch (e) { } }, 300); } // el servidor ignoró los borrados: se vuelve a bajar todo
+      else if (!r.more) Y.rec = 0;
       if (!r.more && !hasPending()) break;
     }
     Y.last = Date.now(); lastErr = ''; await saveNow(); setPill(hasPending() ? 'pend' : 'ok');
