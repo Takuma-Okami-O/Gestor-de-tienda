@@ -758,4 +758,10 @@ Object.assign(ACT, {
     almSchedule();
   }
 });
-PAGES.ajustes = c => cols([c.datos, c.cuenta, c.pin, almCard()], [c.equipo, c.perm, c.demo]);
+// «Datos de ejemplo y reinicio» desactivado por ahora (evita borrados accidentales) y «Cerrar sesión» queda al final de Ajustes
+PAGES.ajustes = c => {
+  const cuenta = (c.cuenta || '').replace(/<button class="btn danger" data-act="logout"[^>]*>Cerrar sesión<\/button>/, '');
+  return cols([c.datos, cuenta, c.pin, almCard()], [c.equipo, c.perm]).replace(sig, '') +
+    `<div class="card" style="margin-top:14px"><button class="btn danger" data-act="logout" style="width:100%">Cerrar sesión</button></div>` + sig;
+};
+ACT.wipe = ACT.demo = () => toast('Opción desactivada por seguridad', 'err');
