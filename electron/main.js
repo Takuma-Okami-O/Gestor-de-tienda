@@ -1,12 +1,13 @@
-const { app, BrowserWindow, Menu, shell } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280, height: 820, minWidth: 420, minHeight: 640,
     backgroundColor: '#0f172a', title: 'Gestor de Tienda', autoHideMenuBar: true,
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
-    webPreferences: { contextIsolation: true, sandbox: true }
+    webPreferences: { contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'preload.js') }
   });
   Menu.setApplicationMenu(null);
   // Actualizaciones automáticas: abre la versión publicada en internet (siempre la más nueva).
@@ -22,6 +23,19 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file:') && !(remote && url.startsWith(remote))) { e.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); } });
 }
+// Respaldo diario: Documentos\Gestor de Tienda\Respaldos (se conservan los últimos 4 días)
+ipcMain.handle('rb:save', async (e, name, text) => {
+  let remote = ''; try { remote = require('./remote.json').url || ''; } catch { }
+  const from = (e.senderFrame && e.senderFrame.url) || '';
+  if (!(from.startsWith('file:') || (remote && from.startsWith(new URL(remote).origin)))) throw new Error('origen no permitido');
+  if (typeof name !== 'string' || !/^respaldo-[\w-]+-\d{4}-\d{2}-\d{2}\.json$/.test(name) || typeof text !== 'string') throw new Error('nombre no válido');
+  const dir = path.join(app.getPath('documents'), 'Gestor de Tienda', 'Respaldos');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, name); fs.writeFileSync(file, text, 'utf8');
+  const olds = fs.readdirSync(dir).map(n => ({ n, m: /^respaldo-.+-(\d{4}-\d{2}-\d{2})\.json$/.exec(n) })).filter(x => x.m).sort((a, b) => b.m[1].localeCompare(a.m[1])).slice(4);
+  for (const x of olds) { try { fs.unlinkSync(path.join(dir, x.n)); } catch { } }
+  return { path: file, bytes: Buffer.byteLength(text) };
+});
 const lock = app.requestSingleInstanceLock();
 if (!lock) app.quit();
 else {
