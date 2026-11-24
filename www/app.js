@@ -254,7 +254,7 @@ function vInicio() {
   const dias = [...Array(7)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() - (6 - i)); const k = ymd(d.toISOString()); return { k, l: d.toLocaleDateString('es-VE', { weekday: 'short' }).replace('.', ''), t: sum(fs.filter(f => ymd(f.fecha) === k).map(f => f.total)), hoy: i === 6 }; });
   const mx = Math.max(...dias.map(d => d.t), 1);
   const corte = Date.now() - 30 * 864e5, tp = {};
-  fs.filter(f => new Date(f.fecha) >= corte).forEach(f => f.items.forEach(i => { tp[i.nombre] = (tp[i.nombre] || 0) + i.qty; }));
+  fs.filter(f => new Date(f.fecha) >= corte && !f.historica).forEach(f => f.items.forEach(i => { if (!i.pid) return; tp[i.nombre] = (tp[i.nombre] || 0) + i.qty; }));
   const top = Object.entries(tp).sort((a, b) => b[1] - a[1]).slice(0, 5), tmax = top[0] ? top[0][1] : 1;
   const bajos = S.productos.filter(p => p.stock <= (p.minimo || 0)).sort((a, b) => a.stock - b.stock).slice(0, 6);
   const h = new Date().getHours(), sal = h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches';
